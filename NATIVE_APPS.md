@@ -20,6 +20,10 @@ leaves the phone.
   AirDrop, Drive, Mail and friends all work. No mystery browser downloads.
 - Working Android hardware back button, haptic feedback, keyboard-aware layout
   and safe-area handling on notched devices.
+- The app registers as a handler for PDFs and Office documents, so it shows up
+  in **Open with** / the share sheet from any file manager.
+- **Open in...** - the document on screen can be handed straight to another
+  tool (editor, converter, signer) without saving and re-picking it.
 - The marketing furniture (hero, feature grid, testimonials, FAQ, donation
   ribbon, GitHub links, footer) is stripped out of the app build.
 
@@ -252,6 +256,39 @@ result is cached under `.native-cache/` and only regenerated when the upstream
 payload changes. At runtime the app decodes it with a 210 KB WASM brotli
 decoder instead of the browser's built-in gzip, which makes the _first_ Office
 conversion of a session slightly slower.
+
+## Android and iOS parity
+
+Both apps are the same web build inside the same Capacitor shell, so every
+tool, and the whole UI, is identical. What differs is only the OS integration,
+and only where the two platforms genuinely work differently:
+
+| Capability                    | Android                              | iOS                                        |
+| ----------------------------- | ------------------------------------ | ------------------------------------------ |
+| All 130+ tools, viewer, editor | yes                                  | yes                                        |
+| Opening a document from a file manager | intent filters, 12 MIME types | `CFBundleDocumentTypes`, the same 12 types |
+| Saving a result               | system share sheet, then Documents   | share sheet, then Files → On My iPhone     |
+| Back navigation               | hardware back button                 | Back button in the app header              |
+| Status bar                    | WebView below it, tinted             | edge-to-edge with real safe-area insets    |
+| Keyboard                      | resizes the layout                   | resizes, accessory bar hidden              |
+| Haptics, splash, app icon     | yes                                  | yes                                        |
+
+Two differences are worth knowing about rather than treating as bugs:
+
+- **Back.** Android's hardware button also closes an open modal and needs a
+  double-press to quit; iOS has no hardware button, so the header's Back
+  button is the equivalent. Both reach the same places.
+- **Receiving a share.** Android registers for `SEND` and `SEND_MULTIPLE`, so
+  BentoPDF appears in the share sheet directly. iOS lists apps by their
+  declared document types instead, which typically shows BentoPDF under
+  "Copy to BentoPDF" rather than as a first-class share target. A true iOS
+  share target needs a separate Share Extension - a second Xcode target,
+  which this build does not have.
+
+The iOS app is around 100 MB installed, the same payload the Android build
+carries; the 67 MB APK figure is its compressed download size.
+
+---
 
 ## Things worth knowing
 
