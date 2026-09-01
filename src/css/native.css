@@ -593,3 +593,78 @@ html.native-app,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ------------------------------------------------------ document mode --- */
+
+/*
+ * Once a document is open the phone should be showing the document, not the
+ * app around it. The tab bar goes (the back button in the header is the way
+ * out), the header slims to a single row, and the page gutters collapse so
+ * the canvas runs edge to edge.
+ */
+
+.native-doc-open .native-tabbar {
+  display: none;
+}
+
+.native-doc-open body {
+  padding-bottom: var(--n-safe-bottom);
+}
+
+/* No large title competing with the document. */
+.native-doc-open .native-header-large {
+  display: none;
+}
+
+.native-doc-open.native-screen-tab body {
+  padding-top: calc(var(--n-header-height) + var(--n-safe-top));
+}
+
+.native-doc-open .native-header-title-compact {
+  opacity: 1;
+}
+
+/* Full-bleed: the document supplies its own margins. */
+.native-doc-open main,
+.native-doc-open #app,
+.native-doc-open .container {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.native-doc-open section {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+/*
+ * Tool panels are cards on a desktop; with a document open on a phone they
+ * are just a frame around the thing you came to look at.
+ */
+.native-doc-open #tool-uploader,
+.native-doc-open #tool-content,
+.native-doc-open #editor-container,
+.native-doc-open #pdf-container {
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  padding-left: 0;
+  padding-right: 0;
+  max-width: none;
+}
+
+/* The viewer/editor surface itself takes whatever is left. */
+.native-doc-open #scroller {
+  height: calc(100vh - var(--n-header-height) - var(--n-safe-top) - 5.5rem);
+}
+
+.native-doc-open canvas {
+  max-width: 100%;
+}
+
+/* Marketing and helper copy has no place next to an open document. */
+.native-doc-open #tools-header,
+.native-doc-open .tool-description,
+.native-doc-open #uploader > .max-w-2xl > p:first-of-type {
+  display: none;
+}

@@ -17,6 +17,7 @@ import {
 import { nativePlatform } from './platform.js';
 import { tapFeedback } from './feedback.js';
 import { escapeHtml } from '../utils/helpers.js';
+import { applyNativeCopy, initDocumentMode } from './document-mode.js';
 
 /** Category landing pages whose long SEO intro has no place in the app. */
 const HUB_PAGES = new Set([
@@ -243,6 +244,7 @@ export const initNativeShell = (): void => {
   );
 
   stripWebChrome();
+  applyNativeCopy();
 
   const header = buildHeader();
   const more = buildMoreSheet();
@@ -252,4 +254,7 @@ export const initNativeShell = (): void => {
   document.body.append(tabBar, more.element);
 
   trackScroll(header);
+
+  // Watched last, so the initial state is measured against the finished page.
+  initDocumentMode();
 };
