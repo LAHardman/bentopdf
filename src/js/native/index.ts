@@ -14,6 +14,7 @@ import { initNativeShell } from './shell.js';
 import { initNativeDownloads } from './save.js';
 import { initNativeNavigation } from './navigation.js';
 import { initTouchFeedback } from './feedback.js';
+import { initOpenWith } from './open-with.js';
 
 let started = false;
 
@@ -37,6 +38,9 @@ export const initNativeApp = async (): Promise<void> => {
     initTouchFeedback();
 
     await Promise.all([initSystemUi(), initNativeNavigation()]);
+
+    // Last, so a document handed in by Android lands on a fully built screen.
+    await initOpenWith();
   } catch (error) {
     console.error('[native] Shell failed to initialise', error);
   } finally {
