@@ -47,6 +47,13 @@ const init = async () => {
   injectLanguageSwitcher();
   applyTranslations();
 
+  // A document handed over from another tool (the "Open in..." menu) or from
+  // the OS share sheet. Runs on every page and every platform: it just fills
+  // the page's file input, so no tool needs to know about it.
+  void import('./utils/document-handoff.js').then(({ initHandoff }) =>
+    initHandoff()
+  );
+
   if (isCurrentPageDisabled()) {
     document.title = t('disabledTool.title') || 'Tool Unavailable';
     const main = document.querySelector('main') || document.body;

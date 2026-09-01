@@ -503,6 +503,17 @@ const init = (): void => {
   $('save-btn').addEventListener('click', () => void saveDocument());
   $('close-document').addEventListener('click', closeDocument);
 
+  // Sends the open document straight to another tool - no save-and-re-pick
+  // round trip. Loaded lazily so first paint does not wait on it.
+  void import('../components/open-in.js').then(({ mountOpenIn }) =>
+    mountOpenIn({
+      container: document.getElementById('viewer-actions') as HTMLElement,
+      getFile: () => state.file,
+      currentPage: 'office-editor.html',
+    })
+  );
+
+
   document.getElementById('back-to-tools')?.addEventListener('click', () => {
     window.location.href = import.meta.env.BASE_URL;
   });

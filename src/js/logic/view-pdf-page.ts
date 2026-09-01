@@ -39,6 +39,8 @@ interface ViewerState {
   /** Scale that makes the widest page fit the container. */
   fitScale: number;
   current: number;
+  /** Kept so "Open in..." can hand the same document to another tool. */
+  file: File | null;
 }
 
 const state: ViewerState = {
@@ -47,6 +49,7 @@ const state: ViewerState = {
   zoomIndex: DEFAULT_ZOOM,
   fitScale: 1,
   current: 1,
+  file: null,
 };
 
 const $ = <T extends HTMLElement>(id: string): T =>
@@ -202,6 +205,7 @@ const openFile = async (file: File): Promise<void> => {
     const data = new Uint8Array(await file.arrayBuffer());
     const doc = await pdfjsLib.getDocument({ data }).promise;
     state.doc = doc;
+    state.file = file;
     state.zoomIndex = DEFAULT_ZOOM;
     state.current = 1;
 
@@ -254,6 +258,7 @@ const closeDocument = (): void => {
   void state.doc?.destroy();
   state.doc = null;
   state.slots = [];
+  state.file = null;
   $('pages').textContent = '';
   $('viewer').classList.add('hidden');
   $('uploader').classList.remove('hidden');
@@ -298,6 +303,16 @@ const init = (): void => {
   $('zoom-in').addEventListener('click', () => setZoom(state.zoomIndex + 1));
   $('zoom-out').addEventListener('click', () => setZoom(state.zoomIndex - 1));
   $('close-document').addEventListener('click', closeDocument);
+
+  // Sends the open PDF straight to another tool - no save-and-re-pick round
+  // trip. Loaded lazily so the viewer's first paint does not wait on it.
+  void import('../components/open-in.js').then(({ mountOpenIn }) =>
+    mountOpenIn({
+      container: $('viewer-toolbar'),
+      getFile: () => state.file,
+      currentPage: 'view-pdf.html',
+    })
+  );
 
   document.getElementById('back-to-tools')?.addEventListener('click', () => {
     window.location.href = import.meta.env.BASE_URL;
