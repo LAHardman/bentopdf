@@ -22,14 +22,12 @@ const run = (command) =>
 
 const platforms = requested.length ? requested : ['android', 'ios'];
 
-// iOS projects can only be generated (and built) on macOS.
-const available = platforms.filter((platform) => {
-  if (platform === 'ios' && process.platform !== 'darwin') {
-    console.log('[native] Skipping iOS - it needs macOS and Xcode.');
-    return false;
-  }
-  return platform === 'android' || platform === 'ios';
-});
+// Both projects generate anywhere - `cap add ios` only unpacks a template and
+// wires up Swift Package Manager, no Xcode involved. *Building* the iOS one
+// still needs macOS, which is what the CI workflow in .github/workflows is for.
+const available = platforms.filter(
+  (platform) => platform === 'android' || platform === 'ios'
+);
 
 if (!available.length) {
   console.log('[native] Nothing to set up.');

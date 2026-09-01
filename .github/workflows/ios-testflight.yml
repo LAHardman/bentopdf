@@ -1,0 +1,64 @@
+name: iOS TestFlight
+
+# Manual only. Building the iOS app needs a macOS runner and pushes a build to
+# TestFlight, neither of which should happen on every commit.
+on:
+  workflow_dispatch:
+    inputs:
+      skip_upload:
+        description: 'Build and sign only, do not upload to TestFlight'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # macOS runners are free for public repositories.
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      HUSKY: 0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Reuses the brotli-recompressed LibreOffice payloads between runs. They
+      # take several minutes to produce and only change when the WASM does.
+      - name: Cache the recompressed WASM payloads
+        uses: actions/cache@v4
+        with:
+          path: .native-cache
+          key: native-wasm-${{ hashFiles('public/libreoffice-wasm/*.gz') }}
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build and ship to TestFlight
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          SKIP_UPLOAD: ${{ inputs.skip_upload && '1' || '' }}
+        run: ./scripts/ios-testflight.sh
+
+      - name: Upload the .ipa as a workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bentopdf-ios
+          path: build/ios/export/*.ipa
+          if-no-files-found: warn

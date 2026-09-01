@@ -104,6 +104,91 @@ sideloading, not something the project can work around.
 
 ---
 
+## iOS without a Mac (TestFlight)
+
+Everything above needs a Mac. If you have a paid Apple Developer account you
+can skip owning one: the build runs on a hosted macOS machine and lands in
+TestFlight, which installs on any iPhone from a link with no cable, no Xcode
+and no 7-day expiry.
+
+The iOS project itself generates fine on Linux - `cap add ios` only unpacks a
+template and wires up Swift Package Manager. Only the *compile* needs macOS.
+
+### What you need once
+
+1. **An App Store Connect API key.** App Store Connect → Users and Access →
+   Integrations → App Store Connect API → **+**. Give it the **App Manager**
+   role and download the `.p8`. Apple lets you download it exactly once.
+   Note the **Key ID** and the **Issuer ID** on that page.
+2. **Your Team ID** - developer.apple.com → Membership.
+3. **An app record.** App Store Connect → Apps → **+** → New App, with bundle
+   ID `com.bentopdf.personal` (change it in `capacitor.config.ts` first if you
+   want your own). Register the bundle ID under Certificates, Identifiers &
+   Profiles first if it is not in the dropdown.
+
+You do **not** need to create certificates or provisioning profiles by hand.
+The build passes `-allowProvisioningUpdates` with the API key, so Xcode creates
+and renews them itself. That is the step that normally forces you onto a Mac.
+
+### Route A - GitHub Actions (free here)
+
+This repository is public, so GitHub's macOS runners cost nothing.
+
+Add four repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret          | Value                                    |
+| --------------- | ---------------------------------------- |
+| `APPLE_TEAM_ID` | your 10-character Team ID                |
+| `ASC_KEY_ID`    | the API Key ID                           |
+| `ASC_ISSUER_ID` | the API Issuer ID                        |
+| `ASC_KEY_P8`    | the **whole contents** of the `.p8` file |
+
+Then run the **iOS TestFlight** workflow from the Actions tab. It builds,
+signs, uploads, and also attaches the `.ipa` as a workflow artifact. Tick
+*skip upload* on the first run if you just want to prove the build compiles.
+
+### Route B - EAS Build (if you already pay for Expo)
+
+EAS builds any native project, not just React Native ones, but BentoPDF does
+not fit its defaults: `ios/` is generated rather than committed, and Capacitor
+puts the Xcode project at `ios/App` instead of `ios/`. So `.eas/build/ios-testflight.yml`
+is a custom build config that spells out every step and calls the same script
+Route A does, using the same API key rather than EAS-managed credentials.
+
+```bash
+npm i -g eas-cli
+eas login
+eas init                                    # writes the project ID into app.json
+eas secret:create --name APPLE_TEAM_ID --value <team id>
+eas secret:create --name ASC_KEY_ID    --value <key id>
+eas secret:create --name ASC_ISSUER_ID --value <issuer id>
+eas secret:create --name ASC_KEY_P8    --type file --value ./AuthKey_XXXXXX.p8
+eas build --platform ios --profile ios-testflight
+```
+
+Route A is the better-trodden path for a Capacitor app; Route B exists so a
+paid Expo account is not wasted. Both produce an identical build.
+
+### Getting it onto a phone
+
+TestFlight processing takes 5-15 minutes after upload. Then in App Store
+Connect → TestFlight, add testers to **Internal Testing** (up to 100 people on
+your team, no Apple review) and they install it through the TestFlight app.
+Internal builds expire after 90 days; re-run the workflow to refresh.
+
+Two things to know before you upload:
+
+- **Export compliance.** The build declares `ITSAppUsesNonExemptEncryption` as
+  false, on the basis that BentoPDF's PDF encryption is the standard algorithm
+  published in the PDF specification, which is exempt. That declaration is
+  yours to make, so change it in `scripts/native-patch-ios.mjs` if you disagree.
+- **Licensing.** BentoPDF is AGPL-3.0. Distributing an AGPL app through the App
+  Store has known friction with Apple's terms. Internal TestFlight testing
+  among people on your own team is a much narrower case than public release,
+  but it is worth understanding before you go further than that.
+
+---
+
 ## After you change the code
 
 ```bash

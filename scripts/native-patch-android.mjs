@@ -79,6 +79,11 @@ if (!fs.existsSync(manifestPath)) {
   process.exit(0);
 }
 
+if (!fs.existsSync(manifestPath)) {
+  console.log('[native-patch] No Android project - skipping.');
+  process.exit(0);
+}
+
 const manifest = fs.readFileSync(manifestPath, 'utf8');
 
 if (manifest.includes(MARKER)) {
