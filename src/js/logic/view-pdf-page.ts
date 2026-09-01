@@ -73,9 +73,13 @@ const showError = (message: string): void => {
 
 const scale = (): number => state.fitScale * ZOOM_STEPS[state.zoomIndex];
 
-/** Scale that fits the widest page to the container, with a little margin. */
+/**
+ * Scale that fits the widest page to the viewport, with a little margin.
+ * Measured on the scroller: the page column itself is min-w-max, so its own
+ * width is whatever the content needs rather than what is on screen.
+ */
 const fitScaleFor = (widest: number): number =>
-  Math.max(($('pages').clientWidth - 16) / Math.max(widest, 1), 0.1);
+  Math.max(($('pages-scroll').clientWidth - 16) / Math.max(widest, 1), 0.1);
 
 // ---------------------------------------------------------------- layout --
 

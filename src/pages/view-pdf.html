@@ -140,8 +140,17 @@
         </div>
       </div>
 
-      <!-- Pages are placeholders until they scroll into view. -->
-      <div id="pages" class="flex flex-col items-center gap-4 py-4 px-2"></div>
+      <!--
+        Pages are placeholders until they scroll into view. The outer element
+        scrolls horizontally when zoomed past the viewport width; the inner one
+        is min-w-max so centring never clips the left edge of a wide page.
+      -->
+      <div id="pages-scroll" class="overflow-x-auto">
+        <div
+          id="pages"
+          class="flex flex-col items-center gap-4 py-4 px-2 min-w-max"
+        ></div>
+      </div>
     </div>
 
     <div
