@@ -125,14 +125,27 @@ template and wires up Swift Package Manager. Only the *compile* needs macOS.
    role and download the `.p8`. Apple lets you download it exactly once.
    Note the **Key ID** and the **Issuer ID** on that page.
 2. **Your Team ID** - developer.apple.com → Membership.
-3. **An app record.** App Store Connect → Apps → **+** → New App, with bundle
-   ID `com.bentopdf.personal` (change it in `capacitor.config.ts` first if you
-   want your own). Register the bundle ID under Certificates, Identifiers &
-   Profiles first if it is not in the dropdown.
+3. **Two bundle IDs and an App Group.** Under Certificates, Identifiers &
+   Profiles → Identifiers, register:
+   - `com.bentopdf.personal` — the app
+   - `com.bentopdf.personal.ShareExtension` — the share extension
+   - an **App Group** called `group.com.bentopdf.personal`
+
+   Then enable **App Groups** on both identifiers and tick that group. This is
+   the one part the build cannot do for you: an App Group is account-level
+   configuration, not something a build setting can create. Skipping it gives a
+   signing failure naming the missing entitlement.
+4. **An app record.** App Store Connect → Apps → **+** → New App, with bundle
+   ID `com.bentopdf.personal`.
+
+Changing the bundle ID in `capacitor.config.ts` is fine — the extension's ID
+and the App Group are both derived from it, so use `<your id>.ShareExtension`
+and `group.<your id>` above.
 
 You do **not** need to create certificates or provisioning profiles by hand.
 The build passes `-allowProvisioningUpdates` with the API key, so Xcode creates
-and renews them itself. That is the step that normally forces you onto a Mac.
+and renews them for both targets itself. That is the step that normally forces
+you onto a Mac.
 
 ### Route A - GitHub Actions (free here)
 
@@ -267,6 +280,7 @@ and only where the two platforms genuinely work differently:
 | ----------------------------- | ------------------------------------ | ------------------------------------------ |
 | All 130+ tools, viewer, editor | yes                                  | yes                                        |
 | Opening a document from a file manager | intent filters, 12 MIME types | `CFBundleDocumentTypes`, the same 12 types |
+| Appearing in the share sheet   | `SEND` / `SEND_MULTIPLE` intent filters | a real Share Extension target        |
 | Saving a result               | system share sheet, then Documents   | share sheet, then Files → On My iPhone     |
 | Back navigation               | hardware back button                 | Back button in the app header              |
 | Status bar                    | WebView below it, tinted             | edge-to-edge with real safe-area insets    |
@@ -278,12 +292,38 @@ Two differences are worth knowing about rather than treating as bugs:
 - **Back.** Android's hardware button also closes an open modal and needs a
   double-press to quit; iOS has no hardware button, so the header's Back
   button is the equivalent. Both reach the same places.
-- **Receiving a share.** Android registers for `SEND` and `SEND_MULTIPLE`, so
-  BentoPDF appears in the share sheet directly. iOS lists apps by their
-  declared document types instead, which typically shows BentoPDF under
-  "Copy to BentoPDF" rather than as a first-class share target. A true iOS
-  share target needs a separate Share Extension - a second Xcode target,
-  which this build does not have.
+- **Receiving a share.** Both platforms appear directly in the share sheet,
+  but by different machinery. Android declares `SEND` intent filters on the
+  main activity. iOS needs a separate Share Extension process, which is a
+  second Xcode target - see below. Android accepts multiple files at once
+  (`SEND_MULTIPLE`); the iOS extension takes one at a time.
+
+### How the iOS share extension works
+
+`ios/` is regenerated on every build, so the extension cannot be a thing you
+click together once in Xcode. `scripts/native-patch-ios.mjs` builds the target
+from the sources in `native/ios/`, and then checks its own work - the target
+type, the compiled sources, the embed phase, the target dependency and every
+file path a build setting points at - so a Capacitor template change fails here
+with a sentence rather than inside Xcode ten minutes into a CI run.
+
+The extension and the app are separate processes with separate storage, so a
+shared document travels like this:
+
+1. iOS hands the extension the file.
+2. It copies it into the App Group container both targets are entitled to.
+3. It opens `bentopdf://open?path=...` to wake the app.
+4. `src/js/native/open-with.ts` fetches that path through Capacitor's file
+   bridge and routes the document to the right tool.
+
+If step 3 fails, the extension says so rather than failing silently - the file
+is already in the shared container, so opening BentoPDF is a real recovery.
+
+One thing to know: opening the containing app from a share extension is done
+by walking the responder chain to reach `openURL:`, because an extension has
+no `UIApplication` of its own. It is the long-standing way to do this and is
+fine for TestFlight, but it is worth knowing it exists if you ever take the app
+further than internal testing.
 
 The iOS app is around 100 MB installed, the same payload the Android build
 carries; the 67 MB APK figure is its compressed download size.

@@ -1,14 +1,17 @@
 /**
  * "Open with" and "Share to" support on the native apps.
  *
- * Android hands us the document as a `content://` URI, iOS as a `file://` one.
+ * Documents arrive three ways: Android hands us a `content://` URI, iOS a
+ * `file://` one, and the iOS share extension a `bentopdf://open?path=...` URL
+ * pointing into the App Group container the two processes share.
+ *
  * Two things make that awkward: the Filesystem plugin refuses content URIs
  * outright, and each tool lives on its own page, so the bytes have to survive
  * a navigation.
  *
- * The route that works is Capacitor's own bridge - `convertFileSrc` turns
- * either kind of URI into a URL the WebView is allowed to fetch - and the
- * shared document handoff to carry the blob across the page change.
+ * The route that works is Capacitor's own bridge - `convertFileSrc` turns any
+ * of them into a URL the WebView is allowed to fetch - and the shared document
+ * handoff to carry the blob across the page change.
  */
 import {
   handoffUrl,
@@ -30,6 +33,42 @@ const targetPage = (name: string, mimeType: string): string => {
     return 'office-editor.html';
   }
   return 'office-viewer.html';
+};
+
+/** Scheme the share extension uses to hand a document over. */
+const SHARE_SCHEME = 'bentopdf:';
+
+interface Incoming {
+  /** Something `convertFileSrc` can turn into a fetchable URL. */
+  source: string;
+  /** The real filename, when the sender knew it. */
+  name: string | null;
+}
+
+/**
+ * Works out what to fetch, or null when the URL is not a document at all -
+ * our own pages come through here too when the app resumes.
+ */
+export const parseIncoming = (url: string): Incoming | null => {
+  if (url.toLowerCase().startsWith(`${SHARE_SCHEME}//`)) {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return null;
+    }
+
+    const filePath = parsed.searchParams.get('path');
+    if (!filePath) return null;
+
+    return {
+      source: filePath.startsWith('/') ? `file://${filePath}` : filePath,
+      name: parsed.searchParams.get('name'),
+    };
+  }
+
+  if (/^content:|^file:/i.test(url)) return { source: url, name: null };
+  return null;
 };
 
 /** Best-effort filename. A content URI rarely carries a usable one. */
@@ -63,8 +102,8 @@ const filenameFor = (url: string, mimeType: string): string => {
  * Fetches the document behind an incoming URI and routes it to a tool.
  */
 const receive = async (url: string): Promise<void> => {
-  // Our own pages arrive here too when the app is resumed; ignore them.
-  if (!/^content:|^file:/i.test(url)) return;
+  const incoming = parseIncoming(url);
+  if (!incoming) return;
 
   try {
     showToast('Opening document…');
@@ -74,7 +113,8 @@ const receive = async (url: string): Promise<void> => {
         Capacitor?: { convertFileSrc?: (u: string) => string };
       }
     ).Capacitor;
-    const fetchable = capacitor?.convertFileSrc?.(url) ?? url;
+    const fetchable =
+      capacitor?.convertFileSrc?.(incoming.source) ?? incoming.source;
 
     const response = await fetch(fetchable);
     if (!response.ok) {
@@ -84,7 +124,7 @@ const receive = async (url: string): Promise<void> => {
     const blob = await response.blob();
     if (!blob.size) throw new Error('the file came back empty');
 
-    const name = filenameFor(url, blob.type);
+    const name = incoming.name ?? filenameFor(incoming.source, blob.type);
     await putHandoff({ name, type: blob.type, blob });
 
     window.location.href = handoffUrl(targetPage(name, blob.type));

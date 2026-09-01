@@ -23,6 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import xcode from 'xcode';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const iosDir = path.join(root, 'ios/App');
@@ -33,6 +34,14 @@ const schemePath = path.join(schemeDir, 'App.xcscheme');
 const exportOptionsPath = path.join(iosDir, 'ExportOptions.plist');
 
 const MARKER = 'BentoPDF document types';
+
+/** Sources for the share extension target, kept as real files in native/ios. */
+const templateDir = path.join(root, 'native/ios');
+const SHARE_TARGET = 'ShareExtension';
+/** The URL the extension uses to hand a document to the app. */
+const URL_SCHEME = 'bentopdf';
+/** Placeholder in the templates, rewritten to match the real bundle id. */
+const TEMPLATE_GROUP = 'group.com.bentopdf.personal';
 
 // native:sync runs this unconditionally, and plenty of checkouts only ever
 // generate the Android project. Nothing to patch is not an error.
@@ -108,6 +117,21 @@ ${entries}
 	     on every single upload. -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<!-- How the share extension hands a document to the app. Not advertised to
+	     other apps; it exists so the two halves can talk. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>${URL_SCHEME}</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>${URL_SCHEME}</string>
+			</array>
+		</dict>
+	</array>
 `;
 };
 
@@ -268,3 +292,333 @@ if (fs.existsSync(exportOptionsPath)) {
   );
   console.log('[native-patch] Wrote ExportOptions.plist.');
 }
+
+// ---------------------------------------------------------- share extension -
+
+/**
+ * Adds the share extension target.
+ *
+ * Without it BentoPDF only ever appears under "Copy to" in the iOS share
+ * sheet, because iOS lists apps there by their declared document types rather
+ * than as real share targets. A real target is a second Xcode target, and
+ * since `ios/` is regenerated on every build it has to be built here rather
+ * than clicked together once in Xcode.
+ *
+ * The two halves run as separate processes with separate containers, so the
+ * shared file goes through an App Group and the path travels over a private
+ * URL scheme.
+ */
+
+/** Whatever the app's bundle id actually is - it may have been customised. */
+const appBundleId = (project) => {
+  const configs = project.pbxXCBuildConfigurationSection();
+  for (const [key, config] of Object.entries(configs)) {
+    if (key.endsWith('_comment') || typeof config !== 'object') continue;
+    const id = config.buildSettings?.PRODUCT_BUNDLE_IDENTIFIER;
+    // The extension's own configs are added later, so at this point any bundle
+    // id in the project belongs to the app.
+    if (id) return id.replace(/"/g, '');
+  }
+  return 'com.bentopdf.personal';
+};
+
+/** Copies a template across, pointing it at this project's App Group. */
+const copyTemplate = (from, to, appGroup) => {
+  const body = fs
+    .readFileSync(from, 'utf8')
+    .split(TEMPLATE_GROUP)
+    .join(appGroup);
+  fs.mkdirSync(path.dirname(to), { recursive: true });
+  fs.writeFileSync(to, body);
+};
+
+const addShareExtension = () => {
+  const project = xcode.project(pbxprojPath);
+  project.parseSync();
+
+  // pbxTargetByName compares the raw pbxproj value, which is quoted, so it
+  // never matches a plain name - and a missed match silently adds a second
+  // copy of the target.
+  const existing = Object.entries(project.hash.project.objects.PBXNativeTarget)
+    .filter(([key]) => !key.endsWith('_comment'))
+    .some(([, t]) => String(t.name).replace(/"/g, '') === SHARE_TARGET);
+  if (existing) {
+    console.log('[native-patch] Share extension already present.');
+    return;
+  }
+
+  const bundleId = appBundleId(project);
+  const appGroup = `group.${bundleId}`;
+  const extensionDir = path.join(iosDir, SHARE_TARGET);
+
+  for (const name of [
+    'ShareViewController.swift',
+    'ShareExtension-Info.plist',
+    'ShareExtension.entitlements',
+  ]) {
+    copyTemplate(
+      path.join(templateDir, SHARE_TARGET, name),
+      path.join(extensionDir, name),
+      appGroup
+    );
+  }
+  copyTemplate(
+    path.join(templateDir, 'App.entitlements'),
+    path.join(iosDir, 'App/App.entitlements'),
+    appGroup
+  );
+
+  // The group gives Xcode somewhere to show the files, and gives us the file
+  // references to build against - so nothing gets added to the project twice.
+  const group = project.addPbxGroup(
+    [
+      'ShareViewController.swift',
+      'ShareExtension-Info.plist',
+      'ShareExtension.entitlements',
+    ],
+    SHARE_TARGET,
+    SHARE_TARGET
+  );
+
+  const groups = project.hash.project.objects.PBXGroup;
+  const rootGroup = Object.keys(groups).find(
+    (key) =>
+      !key.endsWith('_comment') &&
+      groups[key].name === undefined &&
+      groups[key].path === undefined
+  );
+  if (!rootGroup) {
+    console.error('[native-patch] Could not find the project root group.');
+    process.exit(1);
+  }
+  project.addToPbxGroup(group.uuid, rootGroup);
+
+  const target = project.addTarget(
+    SHARE_TARGET,
+    'app_extension',
+    SHARE_TARGET,
+    `${bundleId}.${SHARE_TARGET}`
+  );
+
+  // addTarget also creates the Copy Files phase on the app target that embeds
+  // the .appex, which is what actually ships the extension inside the app.
+  const sources = project.addBuildPhase(
+    [],
+    'PBXSourcesBuildPhase',
+    'Sources',
+    target.uuid
+  );
+  project.addBuildPhase([], 'PBXResourcesBuildPhase', 'Resources', target.uuid);
+  project.addBuildPhase(
+    [],
+    'PBXFrameworksBuildPhase',
+    'Frameworks',
+    target.uuid
+  );
+
+  // Compile the Swift file by pointing at the reference the group already
+  // made, rather than letting addBuildPhase create a second one.
+  const swiftRef = group.pbxGroup.children.find(
+    (child) => child.comment === 'ShareViewController.swift'
+  )?.value;
+  if (!swiftRef) {
+    console.error('[native-patch] Lost the ShareViewController file reference.');
+    process.exit(1);
+  }
+
+  const buildFileUuid = project.generateUuid();
+  const comment = 'ShareViewController.swift in Sources';
+  project.hash.project.objects.PBXBuildFile[buildFileUuid] = {
+    isa: 'PBXBuildFile',
+    fileRef: swiftRef,
+    fileRef_comment: 'ShareViewController.swift',
+  };
+  project.hash.project.objects.PBXBuildFile[`${buildFileUuid}_comment`] =
+    comment;
+  sources.buildPhase.files.push({ value: buildFileUuid, comment });
+
+  // Capacitor's project has never needed a target dependency, so the sections
+  // addTargetDependency writes into do not exist yet - and it fails silently
+  // if they are missing.
+  for (const section of ['PBXTargetDependency', 'PBXContainerItemProxy']) {
+    project.hash.project.objects[section] ??= {};
+  }
+  project.addTargetDependency(appTargetId(), [target.uuid]);
+
+  // Settings addTarget does not know about. Version numbers are deliberately
+  // left to the command line so the app and its extension always match, which
+  // App Store validation insists on.
+  const extensionSettings = {
+    CODE_SIGN_ENTITLEMENTS: `"${SHARE_TARGET}/${SHARE_TARGET}.entitlements"`,
+    CODE_SIGN_STYLE: 'Automatic',
+    GENERATE_INFOPLIST_FILE: 'NO',
+    IPHONEOS_DEPLOYMENT_TARGET: '15.0',
+    SWIFT_VERSION: '5.0',
+    TARGETED_DEVICE_FAMILY: '"1,2"',
+    // The host app carries the Swift runtime; an extension embedding its own
+    // is rejected on upload.
+    ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: 'NO',
+    MARKETING_VERSION: '1.0',
+    CURRENT_PROJECT_VERSION: '1',
+  };
+
+  const configs = project.pbxXCBuildConfigurationSection();
+  let patchedExtension = 0;
+  let patchedApp = 0;
+  for (const [key, config] of Object.entries(configs)) {
+    if (key.endsWith('_comment') || typeof config !== 'object') continue;
+    const settings = config.buildSettings;
+    if (!settings) continue;
+
+    if (settings.PRODUCT_NAME === `"${SHARE_TARGET}"`) {
+      Object.assign(settings, extensionSettings);
+      patchedExtension += 1;
+    } else if (settings.PRODUCT_BUNDLE_IDENTIFIER) {
+      // The app needs the App Group entitlement too, or it cannot read what
+      // the extension writes.
+      settings.CODE_SIGN_ENTITLEMENTS = '"App/App.entitlements"';
+      patchedApp += 1;
+    }
+  }
+
+  if (!patchedExtension || !patchedApp) {
+    console.error(
+      `[native-patch] Build settings did not apply (extension: ${patchedExtension}, app: ${patchedApp}).`
+    );
+    process.exit(1);
+  }
+
+  fs.writeFileSync(pbxprojPath, project.writeSync());
+  console.log(
+    `[native-patch] Added the ${SHARE_TARGET} target (${bundleId}.${SHARE_TARGET}, App Group ${appGroup}).`
+  );
+};
+
+/**
+ * Checks the project actually holds together before xcodebuild sees it.
+ *
+ * Everything above is assembled by hand against Capacitor's template. If that
+ * template shifts, the failure would otherwise surface as an opaque Xcode
+ * error on a CI runner ten minutes into a build, so it is worth a few seconds
+ * here to fail with a sentence that says what is wrong.
+ */
+const verifyShareExtension = () => {
+  const project = xcode.project(pbxprojPath);
+  project.parseSync();
+  const objects = project.hash.project.objects;
+  const unquote = (value) => String(value).replace(/^"|"$/g, '');
+  const entries = (section) =>
+    Object.entries(objects[section] ?? {}).filter(
+      ([key]) => !key.endsWith('_comment')
+    );
+
+  const problems = [];
+  const require_ = (ok, message) => {
+    if (!ok) problems.push(message);
+  };
+
+  const targets = entries('PBXNativeTarget');
+  const app = targets.find(([, t]) => unquote(t.name) === 'App');
+  const extension = targets.find(([, t]) => unquote(t.name) === SHARE_TARGET);
+
+  require_(!!app, 'the App target is missing');
+  require_(!!extension, `the ${SHARE_TARGET} target is missing`);
+  // A failed idempotency check adds a second copy rather than erroring, and
+  // Xcode's complaint about that is not obviously about duplication.
+  require_(
+    targets.length === 2,
+    `expected exactly 2 targets, found ${targets.length}: ${targets
+      .map(([, t]) => unquote(t.name))
+      .join(', ')}`
+  );
+  if (!app || !extension) {
+    console.error(`[native-patch] ${problems.join('; ')}`);
+    process.exit(1);
+  }
+
+  require_(
+    unquote(extension[1].productType) === 'com.apple.product-type.app-extension',
+    'the extension is not an app-extension target'
+  );
+
+  // The Swift file has to be compiled by the extension, not just sitting in a
+  // group looking present.
+  const sourcesKey = extension[1].buildPhases
+    .map((phase) => phase.value)
+    .find((key) => objects.PBXSourcesBuildPhase?.[key]);
+  const compiled = (objects.PBXSourcesBuildPhase?.[sourcesKey]?.files ?? []).map(
+    (file) =>
+      unquote(
+        objects.PBXFileReference[objects.PBXBuildFile[file.value].fileRef].path
+      )
+  );
+  require_(
+    compiled.includes('ShareViewController.swift'),
+    `the extension compiles nothing useful (${compiled.join(', ') || 'no sources'})`
+  );
+
+  // Without this the extension is built and then thrown away.
+  const copyPhase = entries('PBXCopyFilesBuildPhase').find(([key]) =>
+    app[1].buildPhases.some((phase) => phase.value === key)
+  );
+  require_(!!copyPhase, 'the app has no Copy Files phase to embed the extension');
+  if (copyPhase) {
+    require_(
+      Number(copyPhase[1].dstSubfolderSpec) === 13,
+      `the extension is embedded into the wrong folder (spec ${copyPhase[1].dstSubfolderSpec}, expected 13/PlugIns)`
+    );
+    const embedded = (copyPhase[1].files ?? []).map((file) =>
+      unquote(
+        objects.PBXFileReference[objects.PBXBuildFile[file.value].fileRef].path
+      )
+    );
+    require_(
+      embedded.some((name) => name.includes(`${SHARE_TARGET}.appex`)),
+      `the Copy Files phase does not carry the .appex (${embedded.join(', ') || 'empty'})`
+    );
+  }
+
+  const dependency = entries('PBXTargetDependency').find(
+    ([, d]) => d.target === extension[0]
+  );
+  require_(!!dependency, 'the app does not depend on the extension');
+  require_(
+    !!dependency &&
+      (app[1].dependencies ?? []).some((d) => d.value === dependency[0]),
+    'the dependency is not listed on the App target'
+  );
+
+  // A build setting pointing at a file that is not there fails late and loudly.
+  for (const [, config] of entries('XCBuildConfiguration')) {
+    const settings = config.buildSettings;
+    if (!settings) continue;
+    const isExtension = settings.PRODUCT_NAME === `"${SHARE_TARGET}"`;
+    const isApp = unquote(settings.PRODUCT_BUNDLE_IDENTIFIER ?? '').length > 0 && !isExtension;
+    if (!isExtension && !isApp) continue;
+
+    const label = `${isExtension ? SHARE_TARGET : 'App'} ${config.name}`;
+    for (const key of ['INFOPLIST_FILE', 'CODE_SIGN_ENTITLEMENTS']) {
+      const value = settings[key];
+      if (!value) {
+        require_(false, `${label} has no ${key}`);
+        continue;
+      }
+      require_(
+        fs.existsSync(path.join(iosDir, unquote(value))),
+        `${label}: ${key} points at ${unquote(value)}, which does not exist`
+      );
+    }
+  }
+
+  if (problems.length) {
+    console.error(
+      `[native-patch] The iOS project is not buildable:\n  - ${problems.join('\n  - ')}`
+    );
+    process.exit(1);
+  }
+
+  console.log('[native-patch] Share extension wiring verified.');
+};
+
+addShareExtension();
+verifyShareExtension();
