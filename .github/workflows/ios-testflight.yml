@@ -42,8 +42,10 @@ jobs:
           path: .native-cache
           key: native-wasm-${{ hashFiles('public/libreoffice-wasm/*.gz') }}
 
-      - name: Select Xcode
-        run: sudo xcode-select -s /Applications/Xcode.app
+      # The runner already has a default Xcode selected; forcing a path is a
+      # failure mode with no upside. Record which one built this.
+      - name: Show the toolchain
+        run: xcodebuild -version
 
       - name: Build and ship to TestFlight
         env:
@@ -51,7 +53,6 @@ jobs:
           ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
           ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
           ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
-          BUILD_NUMBER: ${{ github.run_number }}
           SKIP_UPLOAD: ${{ inputs.skip_upload && '1' || '' }}
         run: ./scripts/ios-testflight.sh
 

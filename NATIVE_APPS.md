@@ -151,6 +151,11 @@ you onto a Mac.
 
 This repository is public, so GitHub's macOS runners cost nothing.
 
+**The workflow has to be on your default branch before you can run it.** GitHub
+resolves manually-triggered workflows from the default branch, so a workflow
+that only exists on a feature branch does not appear in the Actions tab at all
+and cannot be dispatched by API either. Merge first, then run.
+
 Add four repository secrets (Settings → Secrets and variables → Actions):
 
 | Secret          | Value                                    |

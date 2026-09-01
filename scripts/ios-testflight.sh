@@ -16,7 +16,9 @@
 #   ASC_KEY_P8             the .p8 private key, contents (not a path)
 # Optional:
 #   BUILD_NUMBER           defaults to a UTC timestamp, which is always
-#                          higher than the last one TestFlight saw
+#                          higher than the last one TestFlight saw. Two digits
+#                          of year, not four: CFBundleVersion components must
+#                          fit in 32 bits, and 202609012145 does not.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,7 +30,7 @@ for var in APPLE_TEAM_ID ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
   fi
 done
 
-BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M)}"
+BUILD_NUMBER="${BUILD_NUMBER:-$(date -u +%y%m%d%H%M)}"
 WORKSPACE_DIR="ios/App"
 ARCHIVE="$PWD/build/ios/App.xcarchive"
 EXPORT_DIR="$PWD/build/ios/export"
