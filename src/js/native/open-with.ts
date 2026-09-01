@@ -29,7 +29,9 @@ interface IncomingFile {
 const targetPage = (name: string, mimeType: string): string => {
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
 
-  if (ext === 'pdf' || mimeType === 'application/pdf') return 'edit-pdf.html';
+  // Opening a PDF from elsewhere almost always means "read this", so it goes
+  // to the plain viewer; the editor is a deliberate choice from the tool list.
+  if (ext === 'pdf' || mimeType === 'application/pdf') return 'view-pdf.html';
 
   // Writer documents can be edited; everything else opens read-only.
   if (['doc', 'docx', 'odt', 'rtf', 'txt'].includes(ext)) {
