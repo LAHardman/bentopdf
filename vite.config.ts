@@ -533,16 +533,40 @@ function nativeLinkRewritePlugin(): Plugin {
         if (file.endsWith('.html')) pages.add(file.slice(0, -'.html'.length));
       }
 
+      // Opening a document navigates to the tool's page, and the browser
+      // paints that page's own markup - site header, "Back to Tools", upload
+      // card - before the native shell has had a chance to replace any of it.
+      // The result is the website flashing up inside the app on every open.
+      //
+      // Holding the first paint until the shell says it is ready costs a few
+      // frames of flat app-coloured background instead. It has to be inline in
+      // the head: a stylesheet or a module would arrive too late to matter.
+      // The timeout is not optional - without it, any failure in the shell
+      // leaves a permanently blank app.
+      const bootGuard = [
+        '<style id="native-boot-style">',
+        'html.native-booting{background:#0B0F17}',
+        'html.native-booting body{visibility:hidden}',
+        '</style>',
+        '<script>(function(){',
+        'var d=document.documentElement;d.classList.add("native-booting");',
+        'setTimeout(function(){d.classList.remove("native-booting")},3000);',
+        '})();</script>',
+      ].join('');
+
       let rewritten = 0;
       for (const file of fs.readdirSync(outDir)) {
         if (!file.endsWith('.html')) continue;
         const diskPath = resolve(outDir, file);
         const source = fs.readFileSync(diskPath, 'utf8');
-        const updated = source.replace(
+        let updated = source.replace(
           /href="\/([a-z0-9-]+)"/gi,
           (match, page: string) =>
             pages.has(page) ? `href="/${page}.html"` : match
         );
+        if (!updated.includes('native-boot-style')) {
+          updated = updated.replace('</head>', `${bootGuard}</head>`);
+        }
         if (updated !== source) {
           fs.writeFileSync(diskPath, updated);
           rewritten += 1;

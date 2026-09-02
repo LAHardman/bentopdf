@@ -12,8 +12,11 @@ import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist';
 import { formatBytes } from '../utils/helpers.js';
 
 /** Zoom steps, as a multiple of fit-to-width. */
+/** What the +/- buttons snap between. Pinch is continuous within the range. */
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
-const DEFAULT_ZOOM = 2; // index of 1.0
+const MIN_ZOOM = ZOOM_STEPS[0];
+const MAX_ZOOM = ZOOM_STEPS[ZOOM_STEPS.length - 1];
+const DEFAULT_ZOOM = 1;
 
 /** Render pages this far outside the viewport, in screen-heights. */
 const OVERSCAN = 1.5;
@@ -35,7 +38,8 @@ interface PageSlot {
 interface ViewerState {
   doc: PDFDocumentProxy | null;
   slots: PageSlot[];
-  zoomIndex: number;
+  /** Continuous zoom multiplier, not a step index - pinch lands anywhere. */
+  zoom: number;
   /** Scale that makes the widest page fit the container. */
   fitScale: number;
   current: number;
@@ -46,7 +50,7 @@ interface ViewerState {
 const state: ViewerState = {
   doc: null,
   slots: [],
-  zoomIndex: DEFAULT_ZOOM,
+  zoom: DEFAULT_ZOOM,
   fitScale: 1,
   current: 1,
   file: null,
@@ -74,7 +78,7 @@ const showError = (message: string): void => {
   errorTimer = window.setTimeout(() => banner.classList.add('hidden'), 6000);
 };
 
-const scale = (): number => state.fitScale * ZOOM_STEPS[state.zoomIndex];
+const scale = (): number => state.fitScale * state.zoom;
 
 /**
  * Scale that fits the widest page to the viewport, with a little margin.
@@ -93,8 +97,7 @@ const layoutPages = (): void => {
     slot.element.style.width = `${Math.round(slot.width * s)}px`;
     slot.element.style.height = `${Math.round(slot.height * s)}px`;
   }
-  $('zoom-level').textContent =
-    `${Math.round(ZOOM_STEPS[state.zoomIndex] * 100)}%`;
+  $('zoom-level').textContent = `${Math.round(state.zoom * 100)}%`;
 };
 
 /** Drops a rendered page back to a placeholder, freeing its canvas. */
@@ -186,15 +189,52 @@ const onScroll = (): void => {
   scrollTimer = window.setTimeout(updateVisible, 80);
 };
 
-const setZoom = (index: number): void => {
-  const clamped = Math.min(Math.max(index, 0), ZOOM_STEPS.length - 1);
-  if (clamped === state.zoomIndex) return;
-  state.zoomIndex = clamped;
+/**
+ * Applies a new zoom, keeping whatever was under `focus` under it afterwards.
+ *
+ * Without the focal correction, pinching to read something in the corner of a
+ * page walks it off the screen - the content grows around the scroll origin
+ * rather than around your fingers.
+ */
+const setZoom = (zoom: number, focus?: { x: number; y: number }): void => {
+  const clamped = Math.min(Math.max(zoom, MIN_ZOOM), MAX_ZOOM);
+  if (Math.abs(clamped - state.zoom) < 0.001) return;
+
+  const scroller = $('pages-scroll');
+  const pages = $('pages');
+
+  // Where the focal point sits in unscaled page coordinates, before the change.
+  const before = pages.getBoundingClientRect();
+  const anchor = focus ?? {
+    x: before.left + scroller.clientWidth / 2,
+    y: window.innerHeight / 2,
+  };
+  const previous = scale();
+  const contentX = (anchor.x - before.left) / previous;
+  const contentY = (anchor.y - before.top) / previous;
+
+  state.zoom = clamped;
 
   // Everything on screen is now the wrong size; re-render from scratch.
   for (const slot of state.slots) release(slot);
   layoutPages();
+
+  // Measure again rather than predict: the scroller clamps, and the column is
+  // centred, so the new origin is not simply the old one times the ratio.
+  const after = pages.getBoundingClientRect();
+  scroller.scrollLeft += after.left + contentX * scale() - anchor.x;
+  window.scrollBy(0, after.top + contentY * scale() - anchor.y);
+
   updateVisible();
+};
+
+/** The +/- buttons move to the next rung of the ladder from wherever we are. */
+const stepZoom = (direction: 1 | -1): void => {
+  const next =
+    direction > 0
+      ? ZOOM_STEPS.find((step) => step > state.zoom + 0.001)
+      : [...ZOOM_STEPS].reverse().find((step) => step < state.zoom - 0.001);
+  if (next !== undefined) setZoom(next);
 };
 
 // ------------------------------------------------------------------ open --
@@ -206,7 +246,7 @@ const openFile = async (file: File): Promise<void> => {
     const doc = await pdfjsLib.getDocument({ data }).promise;
     state.doc = doc;
     state.file = file;
-    state.zoomIndex = DEFAULT_ZOOM;
+    state.zoom = DEFAULT_ZOOM;
     state.current = 1;
 
     // Measure every page so the placeholders are the right shape.
@@ -265,6 +305,114 @@ const closeDocument = (): void => {
   $<HTMLInputElement>('file-input').value = '';
 };
 
+// ----------------------------------------------------------------- pinch --
+
+/**
+ * Two-finger zoom.
+ *
+ * Re-rendering pdf.js pages on every gesture frame is far too slow to track
+ * fingers, so the gesture scales the page column with a CSS transform - cheap,
+ * and the GPU does it - and the real render happens once, on release. The
+ * transform is thrown away at that point, so the pages end up crisp rather
+ * than a stretched bitmap.
+ *
+ * One finger is left entirely alone: the scroller already pans horizontally
+ * and the window scrolls vertically, which is what dragging a zoomed page
+ * should do.
+ */
+const initPinchZoom = (): void => {
+  const scroller = $('pages-scroll');
+  const pages = $('pages');
+
+  const active = new Map<number, { x: number; y: number }>();
+  let startSpread = 0;
+  let startZoom = 1;
+  let focus = { x: 0, y: 0 };
+  let ratio = 1;
+
+  const spread = (): number => {
+    const [a, b] = [...active.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+  const midpoint = (): { x: number; y: number } => {
+    const [a, b] = [...active.values()];
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
+
+  const endGesture = (): void => {
+    if (!startSpread) return;
+    startSpread = 0;
+    pages.style.transform = '';
+    pages.style.transformOrigin = '';
+    // The browser owns scrolling again the moment we are not pinching.
+    scroller.style.touchAction = '';
+    setZoom(startZoom * ratio, focus);
+    ratio = 1;
+  };
+
+  scroller.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (event.pointerType === 'mouse') return;
+      active.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (active.size === 2) {
+        startSpread = spread();
+        startZoom = state.zoom;
+        focus = midpoint();
+        ratio = 1;
+        // Stop the WebView trying to scroll or zoom underneath the gesture.
+        scroller.style.touchAction = 'none';
+      }
+    },
+    { passive: true }
+  );
+
+  scroller.addEventListener(
+    'pointermove',
+    (event) => {
+      if (!active.has(event.pointerId)) return;
+      active.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (active.size !== 2 || !startSpread) return;
+
+      event.preventDefault();
+      const next = spread() / startSpread;
+      // Clamp against the same limits the commit uses, so the preview cannot
+      // promise a zoom that setZoom then refuses.
+      const target = Math.min(
+        Math.max(startZoom * next, MIN_ZOOM),
+        MAX_ZOOM
+      );
+      ratio = target / startZoom;
+
+      const box = pages.getBoundingClientRect();
+      pages.style.transformOrigin = `${focus.x - box.left}px ${focus.y - box.top}px`;
+      pages.style.transform = `scale(${ratio})`;
+    },
+    { passive: false }
+  );
+
+  for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
+    scroller.addEventListener(type, (event) => {
+      active.delete(event.pointerId);
+      if (active.size < 2) endGesture();
+    });
+  }
+
+  // Trackpad pinch and ctrl+wheel arrive as wheel events, not pointers.
+  scroller.addEventListener(
+    'wheel',
+    (event) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      setZoom(state.zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1), {
+        x: event.clientX,
+        y: event.clientY,
+      });
+    },
+    { passive: false }
+  );
+};
+
 // ---------------------------------------------------------------- wiring --
 
 const init = (): void => {
@@ -300,8 +448,9 @@ const init = (): void => {
     updateVisible();
   });
 
-  $('zoom-in').addEventListener('click', () => setZoom(state.zoomIndex + 1));
-  $('zoom-out').addEventListener('click', () => setZoom(state.zoomIndex - 1));
+  $('zoom-in').addEventListener('click', () => stepZoom(1));
+  $('zoom-out').addEventListener('click', () => stepZoom(-1));
+  initPinchZoom();
   $('close-document').addEventListener('click', closeDocument);
 
   // Sends the open PDF straight to another tool - no save-and-re-pick round

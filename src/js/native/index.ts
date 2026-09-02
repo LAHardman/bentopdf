@@ -19,16 +19,33 @@ import { initOpenWith } from './open-with.js';
 let started = false;
 
 /**
+ * Drops the first-paint guard the native HTML build injects into every page.
+ *
+ * The guard hides the body so the website's own framing does not flash up
+ * while the shell is still replacing it. Whatever happens above, this has to
+ * run, or the app is left showing nothing at all.
+ */
+const revealApp = (): void =>
+  document.documentElement.classList.remove('native-booting');
+
+/**
  * Last line of defence: if anything upstream of us throws before the shell
  * boots, the user would be left staring at a frozen splash screen. This runs
  * as soon as the module is evaluated, independent of `initNativeApp`.
  */
 if (isNativeApp()) {
-  window.setTimeout((): void => void hideSplash(), 5000);
+  window.setTimeout((): void => {
+    revealApp();
+    void hideSplash();
+  }, 5000);
 }
 
 export const initNativeApp = async (): Promise<void> => {
-  if (started || !isNativeApp()) return;
+  if (!isNativeApp()) {
+    revealApp();
+    return;
+  }
+  if (started) return;
   started = true;
 
   try {
@@ -44,7 +61,9 @@ export const initNativeApp = async (): Promise<void> => {
   } catch (error) {
     console.error('[native] Shell failed to initialise', error);
   } finally {
-    // Whatever happened above, never leave the user staring at the splash.
+    // Whatever happened above, never leave the user staring at the splash -
+    // or, now, at a deliberately blank page.
+    revealApp();
     await hideSplash();
   }
 };
