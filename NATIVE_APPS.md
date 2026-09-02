@@ -253,6 +253,32 @@ exists before the Xcode project has been generated. That is what the
 it declares the extension's target name, bundle ID and App Group entitlement.
 Without it the build fails to sign the extension.
 
+#### Running Route B from CI instead of your machine
+
+`eas build` does not have to run locally. Add an **`EXPO_TOKEN`** repository
+secret (expo.dev → account settings → access tokens) and the **EAS build**
+workflow drives it from Actions. The runner is `ubuntu-latest`, because the
+compile happens on Expo's macOS machines - the runner only uploads the project
+and gets a build URL back.
+
+One caveat decides how the first run goes: `--non-interactive` needs the iOS
+certificate and ad-hoc profile to **already exist on EAS's servers**, and
+creating them means talking to Apple. Two ways to satisfy that:
+
+- Add `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` and `APPLE_TEAM_ID` as
+  repository secrets - the same four Route A uses. The workflow hands them to
+  EAS as `EXPO_ASC_*`, which lets it create the credentials unattended.
+- Or run `eas build --profile ios-adhoc` locally once. After that the
+  credentials are stored and CI needs only `EXPO_TOKEN`.
+
+The workflow passes `--refresh-ad-hoc-provisioning-profile` for the ad-hoc
+profile, so devices registered since the last build are picked up; without it a
+newly-registered phone silently cannot install.
+
+On its first run the workflow also runs `eas init` to create the Expo project
+and prints the resulting `projectId` to the run summary - commit that into
+`app.json` and the step becomes a no-op.
+
 `.easignore` trims the upload from ~180 MB to ~127 MB by dropping tracked files
 an iOS build never reads, mostly the airgap bundle. Note that EAS *replaces*
 `.gitignore` with it rather than applying both, so it is a copy of `.gitignore`
