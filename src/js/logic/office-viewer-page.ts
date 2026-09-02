@@ -494,6 +494,17 @@ const init = (): void => {
   $('undo-btn').addEventListener('click', () => void undoEdit());
   $('close-document').addEventListener('click', closeDocument);
 
+  // Sends the open document straight to another tool - no save-and-re-pick
+  // round trip. Loaded lazily so first paint does not wait on it.
+  void import('../components/open-in.js').then(({ mountOpenIn }) =>
+    mountOpenIn({
+      container: document.getElementById('viewer-actions') as HTMLElement,
+      getFile: () => state.file,
+      currentPage: 'office-viewer.html',
+    })
+  );
+
+
   for (const tab of document.querySelectorAll<HTMLElement>('.sidebar-tab')) {
     tab.addEventListener('click', () =>
       selectPanel(tab.dataset.panel ?? 'outline')

@@ -1,41 +1,75 @@
 /**
  * "Open with" and "Share to" support on the native apps.
  *
- * Android hands us the document as a `content://` URI. Two things make that
- * awkward: the Filesystem plugin refuses content URIs outright, and each tool
- * lives on its own page, so the bytes have to survive a navigation.
+ * Documents arrive three ways: Android hands us a `content://` URI, iOS a
+ * `file://` one, and the iOS share extension a `bentopdf://open?path=...` URL
+ * pointing into the App Group container the two processes share.
  *
- * The route that works is Capacitor's own bridge - `convertFileSrc` turns a
- * content URI into a `/_capacitor_content_` URL the WebView can fetch - and
- * IndexedDB to carry the blob across the page change, since a 50 MB PDF has
- * no business in sessionStorage.
+ * Two things make that awkward: the Filesystem plugin refuses content URIs
+ * outright, and each tool lives on its own page, so the bytes have to survive
+ * a navigation.
+ *
+ * The route that works is Capacitor's own bridge - `convertFileSrc` turns any
+ * of them into a URL the WebView is allowed to fetch - and the shared document
+ * handoff to carry the blob across the page change.
  */
+import {
+  HANDOFF_PARAM,
+  handoffUrl,
+  putHandoff,
+} from '../utils/document-handoff.js';
 import { hasPlugin, isNativeApp } from './platform.js';
 import { showToast } from './toast.js';
-
-const DB_NAME = 'bentopdf-native';
-const STORE = 'incoming';
-const HANDOFF_KEY = 'file';
-/** Marks a navigation as carrying a handed-off document. */
-const HANDOFF_PARAM = 'native-open';
-
-interface IncomingFile {
-  name: string;
-  type: string;
-  blob: Blob;
-}
 
 /** Which tool should open a given document. */
 const targetPage = (name: string, mimeType: string): string => {
   const ext = name.split('.').pop()?.toLowerCase() ?? '';
 
-  if (ext === 'pdf' || mimeType === 'application/pdf') return 'edit-pdf.html';
+  // Opening a PDF from elsewhere almost always means "read this", so it goes
+  // to the plain viewer; the editor is a deliberate choice from the tool list.
+  if (ext === 'pdf' || mimeType === 'application/pdf') return 'view-pdf.html';
 
   // Writer documents can be edited; everything else opens read-only.
   if (['doc', 'docx', 'odt', 'rtf', 'txt'].includes(ext)) {
     return 'office-editor.html';
   }
   return 'office-viewer.html';
+};
+
+/** Scheme the share extension uses to hand a document over. */
+const SHARE_SCHEME = 'bentopdf:';
+
+interface Incoming {
+  /** Something `convertFileSrc` can turn into a fetchable URL. */
+  source: string;
+  /** The real filename, when the sender knew it. */
+  name: string | null;
+}
+
+/**
+ * Works out what to fetch, or null when the URL is not a document at all -
+ * our own pages come through here too when the app resumes.
+ */
+export const parseIncoming = (url: string): Incoming | null => {
+  if (url.toLowerCase().startsWith(`${SHARE_SCHEME}//`)) {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return null;
+    }
+
+    const filePath = parsed.searchParams.get('path');
+    if (!filePath) return null;
+
+    return {
+      source: filePath.startsWith('/') ? `file://${filePath}` : filePath,
+      name: parsed.searchParams.get('name'),
+    };
+  }
+
+  if (/^content:|^file:/i.test(url)) return { source: url, name: null };
+  return null;
 };
 
 /** Best-effort filename. A content URI rarely carries a usable one. */
@@ -65,55 +99,12 @@ const filenameFor = (url: string, mimeType: string): string => {
   return `document.${ext}`;
 };
 
-// --------------------------------------------------------------- handoff db -
-
-const openDb = (): Promise<IDBDatabase> =>
-  new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('IndexedDB'));
-  });
-
-const putHandoff = async (file: IncomingFile): Promise<void> => {
-  const db = await openDb();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(file, HANDOFF_KEY);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('handoff write failed'));
-  });
-  db.close();
-};
-
-/** Reads and clears the handoff - a document should only open once. */
-const takeHandoff = async (): Promise<IncomingFile | null> => {
-  const db = await openDb();
-  const file = await new Promise<IncomingFile | null>((resolve, reject) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    const store = tx.objectStore(STORE);
-    const get = store.get(HANDOFF_KEY);
-    get.onsuccess = () => {
-      store.delete(HANDOFF_KEY);
-      resolve((get.result as IncomingFile | undefined) ?? null);
-    };
-    get.onerror = () => reject(get.error ?? new Error('handoff read failed'));
-  });
-  db.close();
-  return file;
-};
-
-// ------------------------------------------------------------------ receive -
-
 /**
  * Fetches the document behind an incoming URI and routes it to a tool.
  */
 const receive = async (url: string): Promise<void> => {
-  // Our own pages arrive here too when the app is resumed; ignore them.
-  if (!/^content:|^file:/i.test(url)) return;
+  const incoming = parseIncoming(url);
+  if (!incoming) return;
 
   try {
     showToast('Opening document…');
@@ -123,7 +114,8 @@ const receive = async (url: string): Promise<void> => {
         Capacitor?: { convertFileSrc?: (u: string) => string };
       }
     ).Capacitor;
-    const fetchable = capacitor?.convertFileSrc?.(url) ?? url;
+    const fetchable =
+      capacitor?.convertFileSrc?.(incoming.source) ?? incoming.source;
 
     const response = await fetch(fetchable);
     if (!response.ok) {
@@ -133,11 +125,10 @@ const receive = async (url: string): Promise<void> => {
     const blob = await response.blob();
     if (!blob.size) throw new Error('the file came back empty');
 
-    const name = filenameFor(url, blob.type);
+    const name = incoming.name ?? filenameFor(incoming.source, blob.type);
     await putHandoff({ name, type: blob.type, blob });
 
-    const page = targetPage(name, blob.type);
-    window.location.href = `${import.meta.env.BASE_URL}${page}?${HANDOFF_PARAM}=1`;
+    window.location.href = handoffUrl(targetPage(name, blob.type));
   } catch (error) {
     console.error('[native] Could not open the incoming document', error);
     showToast(
@@ -146,49 +137,53 @@ const receive = async (url: string): Promise<void> => {
   }
 };
 
-/**
- * Hands a received document to the tool page by filling its file input, which
- * is the same path a user-picked file takes - no per-tool wiring needed.
- */
-const deliverToPage = async (): Promise<void> => {
-  const params = new URLSearchParams(window.location.search);
-  if (!params.has(HANDOFF_PARAM)) return;
+/** Remembers the launch URL we have already acted on, for this app run. */
+const LAUNCH_HANDLED_KEY = 'bentopdf:launch-handled';
 
-  const input = document.getElementById('file-input');
-  if (!(input instanceof HTMLInputElement)) return;
+/**
+ * True the first time it is asked about a given launch URL, false after.
+ *
+ * `getLaunchUrl` reports the intent the *activity* was started with, and that
+ * intent does not change when the WebView navigates. So opening a document
+ * navigates to the tool page, the tool page starts up, asks again, gets the
+ * same URL, and navigates again - forever, with the "Opening document" toast
+ * flashing on each pass and the native shell never surviving long enough to
+ * render.
+ *
+ * sessionStorage is exactly the right lifetime: it dies with the WebView, so
+ * launching the app again on the same file is correctly treated as new.
+ */
+const claimLaunchUrl = (url: string): boolean => {
+  // A page reached through the handoff is downstream of a launch that was
+  // already acted on. Cheap second line of defence for when storage throws.
+  if (new URLSearchParams(window.location.search).has(HANDOFF_PARAM)) {
+    return false;
+  }
 
   try {
-    const incoming = await takeHandoff();
-    if (!incoming) return;
-
-    const file = new File([incoming.blob], incoming.name, {
-      type: incoming.type || 'application/octet-stream',
-    });
-
-    const transfer = new DataTransfer();
-    transfer.items.add(file);
-    input.files = transfer.files;
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  } catch (error) {
-    console.error('[native] Could not hand the document to the page', error);
-    showToast('Could not open the shared document');
+    if (sessionStorage.getItem(LAUNCH_HANDLED_KEY) === url) return false;
+    sessionStorage.setItem(LAUNCH_HANDLED_KEY, url);
+  } catch {
+    // Storage unavailable. The check above still covers the loop.
   }
+  return true;
 };
 
 export const initOpenWith = async (): Promise<void> => {
   if (!isNativeApp()) return;
 
-  // A document waiting from a previous navigation takes priority.
-  await deliverToPage();
+  // Delivering a document that is already waiting is main.ts's job now - it
+  // happens on every platform, not just here.
 
   if (!hasPlugin('App')) return;
   const { App } = await import('@capacitor/app');
 
   // Launched by a document.
   const launch = await App.getLaunchUrl().catch((): undefined => undefined);
-  if (launch?.url) await receive(launch.url);
+  if (launch?.url && claimLaunchUrl(launch.url)) await receive(launch.url);
 
-  // Handed a document while already running.
+  // Handed a document while already running. Not guarded: each of these is a
+  // fresh, deliberate share, even if it is the same file twice.
   App.addListener('appUrlOpen', (event): void => void receive(event.url)).catch(
     () => {}
   );

@@ -668,3 +668,20 @@ html.native-app,
 .native-doc-open #uploader > .max-w-2xl > p:first-of-type {
   display: none;
 }
+
+/* --------------------------------------------------------- doc toolbars - */
+
+/*
+ * The viewers pin their toolbar under the site header with Tailwind's
+ * `top-16` - 4rem, the height of the *web* header. The app's header is a
+ * different height entirely: it is fixed, it carries the status bar inset,
+ * and it collapses on scroll. Leaving the 4rem in place left a strip of the
+ * document showing through between the header and the toolbar.
+ *
+ * The shell measures the header and publishes it as --n-header-offset, so
+ * this tracks the real thing rather than a number that happens to be right
+ * on one device.
+ */
+.native-app .doc-toolbar {
+  top: var(--n-header-offset, calc(var(--n-header-height) + var(--n-safe-top)));
+}

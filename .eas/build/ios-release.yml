@@ -1,0 +1,37 @@
+# EAS custom build: BentoPDF is a Capacitor app, not a React Native one, so the
+# standard EAS iOS flow (which expects an Expo project and an `ios/` directory
+# in the repo) does not apply. Every step is spelled out instead, and the actual
+# build is the same script the GitHub Actions runner uses.
+#
+# Run with:  eas build --platform ios --profile ios-testflight
+#       or:  eas build --platform ios --profile ios-adhoc
+build:
+  name: BentoPDF iOS -> TestFlight
+  steps:
+    - eas/checkout
+
+    - eas/install_node_modules
+
+    # Signing uses an App Store Connect API key rather than EAS-managed
+    # credentials, because EAS's credential steps assume the React Native
+    # project layout and BentoPDF's Xcode project lives at ios/App.
+    # Set these first:
+    #   eas secret:create --name APPLE_TEAM_ID --value ...
+    #   eas secret:create --name ASC_KEY_ID    --value ...
+    #   eas secret:create --name ASC_ISSUER_ID --value ...
+    #   eas secret:create --name ASC_KEY_P8    --type file --value ./AuthKey_XXX.p8
+    - run:
+        name: Build and ship to TestFlight
+        command: |
+          # A file-type EAS secret arrives as a path, not contents; the build
+          # script wants the key itself.
+          if [ -f "${ASC_KEY_P8:-}" ]; then
+            export ASC_KEY_P8="$(cat "$ASC_KEY_P8")"
+          fi
+          ./scripts/ios-release.sh
+
+    - eas/upload_artifact:
+        name: Upload the .ipa
+        inputs:
+          type: build-artifact
+          path: build/ios/export/*.ipa

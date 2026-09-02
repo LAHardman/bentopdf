@@ -36,6 +36,15 @@
     />
 
     <link rel="icon" type="image/svg+xml" href="/images/favicon.svg" />
+
+    <!-- Installable on iOS via Safari's Add to Home Screen -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Word Editor" />
+    <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#0B0F17" />
   </head>
 
   <body class="antialiased bg-gray-900">
@@ -110,7 +119,7 @@
     <!-- ------------------------------------------------------- workspace -->
     <div id="workspace" class="hidden bg-gray-900 text-gray-200">
       <div
-        class="sticky top-16 z-20 bg-gray-800 border-b border-gray-700 px-3 py-2"
+        class="doc-toolbar sticky top-16 z-20 bg-gray-800 border-b border-gray-700 px-3 py-2"
       >
         <div class="flex flex-wrap items-center gap-2">
           <button
@@ -177,7 +186,7 @@
             <i data-lucide="redo-2" class="w-4 h-4"></i>
           </button>
 
-          <div class="ml-auto flex items-center gap-2">
+          <div id="viewer-actions" class="ml-auto flex items-center gap-2">
             <span
               id="doc-name"
               class="text-sm text-gray-400 truncate max-w-40"

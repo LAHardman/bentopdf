@@ -1,0 +1,119 @@
+name: iOS build
+
+# Manual only. Building iOS needs a macOS runner, and both outcomes - a
+# TestFlight upload or a published ad-hoc build - are things you ask for
+# rather than things every commit should do.
+on:
+  workflow_dispatch:
+    inputs:
+      distribution:
+        description: 'How the build gets onto a phone'
+        type: choice
+        options:
+          - adhoc
+          - testflight
+        default: adhoc
+      skip_upload:
+        description: 'TestFlight only: build and sign, but do not upload'
+        type: boolean
+        default: false
+
+# Needed to publish the ad-hoc build as a release asset. A .ipa carrying this
+# app is well over GitHub's 100 MB limit for files committed to a branch, which
+# is why this does not follow the Android APK's pattern.
+permissions:
+  contents: write
+
+concurrency:
+  group: ios-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # macOS runners are free for public repositories.
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      HUSKY: 0
+      ADHOC_TAG: ios-adhoc
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Reuses the brotli-recompressed LibreOffice payloads between runs. They
+      # take several minutes to produce and only change when the WASM does.
+      - name: Cache the recompressed WASM payloads
+        uses: actions/cache@v4
+        with:
+          path: .native-cache
+          key: native-wasm-${{ hashFiles('public/libreoffice-wasm/*.gz') }}
+
+      - name: Show the toolchain
+        run: xcodebuild -version
+
+      # The install manifest has to name the .ipa's URL, and it is written
+      # during the build - before anything has been uploaded. A fixed release
+      # tag makes that URL knowable in advance, and keeps the install link
+      # stable across builds instead of changing every time.
+      - name: Work out the download URL
+        id: dest
+        run: echo "base_url=${{ github.server_url }}/${{ github.repository }}/releases/download/${{ env.ADHOC_TAG }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          DISTRIBUTION: ${{ inputs.distribution }}
+          IPA_BASE_URL: ${{ steps.dest.outputs.base_url }}
+          SKIP_UPLOAD: ${{ inputs.skip_upload && '1' || '' }}
+        run: ./scripts/ios-release.sh
+
+      - name: Publish the ad-hoc build
+        if: inputs.distribution == 'adhoc'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Reuse the release so the tag - and therefore the install link -
+          # never changes; only the assets are replaced.
+          gh release view "$ADHOC_TAG" >/dev/null 2>&1 || gh release create "$ADHOC_TAG" \
+            --title "BentoPDF iOS (ad-hoc)" \
+            --notes "Ad-hoc build for registered devices. The install link is on the workflow run summary."
+          gh release upload "$ADHOC_TAG" \
+            build/ios/export/BentoPDF.ipa \
+            build/ios/export/manifest.plist \
+            --clobber
+
+          LINK="itms-services://?action=download-manifest&url=${{ steps.dest.outputs.base_url }}/manifest.plist"
+          {
+            echo "## Install on a registered device"
+            echo
+            echo 'Open **Safari** on the iPhone and paste this into the address bar:'
+            echo
+            echo '```'
+            echo "$LINK"
+            echo '```'
+            echo
+            echo "The device's UDID must be registered on the team, and the build must be newer than the installed one."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the .ipa as a workflow artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bentopdf-ios
+          path: |
+            build/ios/export/*.ipa
+            build/ios/export/manifest.plist
+          if-no-files-found: warn

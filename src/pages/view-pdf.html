@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>PDF Viewer - Read PDFs in Your Browser | BentoPDF</title>
+    <meta
+      name="title"
+      content="PDF Viewer - Read PDFs in Your Browser | BentoPDF"
+    />
+    <meta
+      name="description"
+      content="★ Open and read PDF files instantly ★ Continuous scrolling ★ Zoom ★ Nothing is uploaded ★ Works entirely in your browser"
+    />
+    <meta
+      name="keywords"
+      content="pdf viewer, read pdf online, open pdf, pdf reader, view pdf browser"
+    />
+    <meta name="author" content="BentoPDF" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://www.bentopdf.com/view-pdf" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://www.bentopdf.com/view-pdf" />
+    <meta property="og:title" content="PDF Viewer | BentoPDF" />
+    <meta
+      property="og:description"
+      content="Open and read PDF files in your browser. Nothing is uploaded."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="PDF Viewer | BentoPDF" />
+    <meta
+      name="twitter:description"
+      content="Open and read PDF files in your browser. Nothing is uploaded."
+    />
+
+    <link rel="icon" type="image/svg+xml" href="/images/favicon.svg" />
+
+    <!-- Installable on iOS via Safari's Add to Home Screen -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PDF Viewer" />
+    <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#0B0F17" />
+  </head>
+
+  <body class="antialiased bg-gray-900">
+    {{> navbar }}
+
+    <div
+      id="uploader"
+      class="min-h-screen flex flex-col items-center justify-start py-12 p-4 bg-gray-900"
+    >
+      <div
+        id="tool-uploader"
+        class="bg-gray-800 rounded-xl shadow-xl px-4 py-8 md:p-8 max-w-2xl w-full text-gray-200 border border-gray-700"
+      >
+        <button
+          id="back-to-tools"
+          class="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 mb-6 font-semibold"
+        >
+          <i data-lucide="arrow-left" class="cursor-pointer"></i>
+          <span class="cursor-pointer" data-i18n="tools.backToTools">
+            Back to Tools
+          </span>
+        </button>
+
+        <h1
+          class="text-2xl font-bold text-white mb-2"
+          data-i18n="tools:viewPdf.name"
+        >
+          PDF Viewer
+        </h1>
+        <p class="text-gray-400 mb-6" data-i18n="tools:viewPdf.subtitle">
+          Open a PDF and read it. Continuous scrolling and zoom, nothing else.
+        </p>
+
+        <div
+          id="drop-zone"
+          class="relative flex flex-col items-center justify-center w-full h-48 md:h-64 border-2 border-dashed border-gray-600 rounded-xl cursor-pointer bg-gray-900 hover:bg-gray-700 transition-colors duration-300"
+        >
+          <div class="flex flex-col items-center justify-center pt-5 pb-6">
+            <i class="ph ph-book-open text-4xl mb-3 text-gray-400"></i>
+            <p class="mb-2 text-sm text-gray-400">
+              <span class="font-semibold" data-i18n="upload.clickToSelect"
+                >Click to select a file</span
+              >
+              <span data-i18n="upload.orDragAndDrop">or drag and drop</span>
+            </p>
+            <p class="text-xs text-gray-500">PDF files</p>
+            <p class="text-xs text-gray-500" data-i18n="upload.filesNeverLeave">
+              Your files never leave your device.
+            </p>
+          </div>
+          <input
+            id="file-input"
+            type="file"
+            class="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
+            accept=".pdf,application/pdf"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------------------------------------------------------- viewer -->
+    <div id="viewer" class="hidden bg-gray-900 text-gray-200">
+      <div
+        id="viewer-toolbar"
+        class="doc-toolbar sticky top-16 z-20 bg-gray-800 border-b border-gray-700 px-3 py-2 flex items-center gap-2 overflow-x-auto"
+      >
+        <button
+          id="close-document"
+          class="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 font-semibold text-sm px-1 shrink-0"
+          aria-label="Open another document"
+        >
+          <i data-lucide="arrow-left" class="w-4 h-4"></i>
+          <span class="hidden sm:inline">Open another</span>
+        </button>
+
+        <span
+          id="doc-name"
+          class="hidden md:block text-sm text-gray-400 truncate flex-1 min-w-0"
+        ></span>
+
+        <span
+          id="page-indicator"
+          class="text-sm text-gray-300 whitespace-nowrap shrink-0"
+        ></span>
+
+        <div class="flex items-center gap-1 shrink-0">
+          <button
+            id="zoom-out"
+            class="btn bg-gray-700 hover:bg-gray-600 text-white px-2 py-2 rounded-lg"
+            aria-label="Zoom out"
+          >
+            <i data-lucide="zoom-out" class="w-4 h-4"></i>
+          </button>
+          <span id="zoom-level" class="text-xs text-gray-300 w-12 text-center"
+            >100%</span
+          >
+          <button
+            id="zoom-in"
+            class="btn bg-gray-700 hover:bg-gray-600 text-white px-2 py-2 rounded-lg"
+            aria-label="Zoom in"
+          >
+            <i data-lucide="zoom-in" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+      <!--
+        Pages are placeholders until they scroll into view. The outer element
+        scrolls horizontally when zoomed past the viewport width; the inner one
+        is min-w-max so centring never clips the left edge of a wide page.
+      -->
+      <div id="pages-scroll" class="overflow-x-auto">
+        <div
+          id="pages"
+          class="flex flex-col items-center gap-4 py-4 px-2 min-w-max"
+        ></div>
+      </div>
+    </div>
+
+    <div
+      id="status-overlay"
+      class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
+    >
+      <div
+        class="bg-gray-800 border border-gray-700 rounded-xl p-6 max-w-sm w-full text-center"
+      >
+        <div
+          class="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"
+        ></div>
+        <p id="status-text" class="text-gray-200 text-sm"></p>
+      </div>
+    </div>
+
+    <div
+      id="error-banner"
+      class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-red-900 border border-red-700 text-red-100 px-4 py-3 rounded-lg text-sm max-w-lg"
+    ></div>
+
+    <script type="module" src="/src/js/utils/lucide-init.ts"></script>
+    <script type="module" src="/src/js/utils/full-width.ts"></script>
+    <script type="module" src="/src/js/logic/view-pdf-page.ts"></script>
+    <script type="module" src="/src/js/mobileMenu.ts"></script>
+    <script type="module" src="/src/js/main.ts"></script>
+  </body>
+</html>

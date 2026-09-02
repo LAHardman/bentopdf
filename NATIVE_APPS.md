@@ -20,6 +20,10 @@ leaves the phone.
   AirDrop, Drive, Mail and friends all work. No mystery browser downloads.
 - Working Android hardware back button, haptic feedback, keyboard-aware layout
   and safe-area handling on notched devices.
+- The app registers as a handler for PDFs and Office documents, so it shows up
+  in **Open with** / the share sheet from any file manager.
+- **Open in...** - the document on screen can be handed straight to another
+  tool (editor, converter, signer) without saving and re-picking it.
 - The marketing furniture (hero, feature grid, testimonials, FAQ, donation
   ribbon, GitHub links, footer) is stripped out of the app build.
 
@@ -104,6 +108,237 @@ sideloading, not something the project can work around.
 
 ---
 
+## iOS without a Mac
+
+Everything above needs a Mac. If you have a paid Apple Developer account you
+can skip owning one: the build runs on a hosted macOS machine, and the result
+installs on an iPhone with no cable, no Xcode and no 7-day expiry.
+
+There are two ways to get it there, and the workflow takes either:
+
+| | **Ad-hoc** (internal distribution) | **TestFlight** |
+| --- | --- | --- |
+| Who can install | only devices whose UDID you registered | up to 100 testers on your team |
+| Apple review | none | none for internal testing |
+| Wait after building | none | 5-15 minutes of processing |
+| App Store Connect record | not needed | needed |
+| How it installs | an `itms-services://` link opened in Safari | the TestFlight app |
+| Build expires | when the profile does (a year) | 90 days |
+
+Ad-hoc is the shorter loop, so it is the workflow's default.
+
+The iOS project itself generates fine on Linux - `cap add ios` only unpacks a
+template and wires up Swift Package Manager. Only the *compile* needs macOS.
+
+### What you need once
+
+1. **An App Store Connect API key.** App Store Connect → Users and Access →
+   Integrations → App Store Connect API → **+**. Give it the **App Manager**
+   role and download the `.p8`. Apple lets you download it exactly once.
+   Note the **Key ID** and the **Issuer ID** on that page.
+2. **Your Team ID** - developer.apple.com → Membership.
+3. **Two bundle IDs and an App Group.** Under Certificates, Identifiers &
+   Profiles → Identifiers, register:
+   - `com.bentopdf.personal` — the app
+   - `com.bentopdf.personal.ShareExtension` — the share extension
+   - an **App Group** called `group.com.bentopdf.personal`
+
+   Then enable **App Groups** on both identifiers and tick that group. This is
+   the one part the build cannot do for you: an App Group is account-level
+   configuration, not something a build setting can create. Skipping it gives a
+   signing failure naming the missing entitlement.
+4. **For ad-hoc: register the devices.** Either in the portal (Certificates,
+   Identifiers & Profiles → Devices → **+**, with each iPhone's UDID) if you
+   are using Route A, or with `eas device:create` if you are using Route B,
+   which walks the phone through it. The provisioning profile picks up every
+   registered device, so adding a tester later means registering their UDID
+   and re-running the build - nothing in the repository changes.
+
+   Route B does not need the App Store Connect API key from step 1 at all;
+   EAS manages the ad-hoc credentials itself.
+5. **For TestFlight only: an app record.** App Store Connect → Apps → **+** →
+   New App, with bundle ID `com.bentopdf.personal`. Ad-hoc does not need one.
+
+Changing the bundle ID in `capacitor.config.ts` is fine — the extension's ID
+and the App Group are both derived from it, so use `<your id>.ShareExtension`
+and `group.<your id>` above.
+
+You do **not** need to create certificates or provisioning profiles by hand.
+The build passes `-allowProvisioningUpdates` with the API key, so Xcode creates
+and renews them for both targets itself. That is the step that normally forces
+you onto a Mac.
+
+### Route A - GitHub Actions (free here)
+
+This repository is public, so GitHub's macOS runners cost nothing.
+
+**The workflow has to be on your default branch before you can run it.** GitHub
+resolves manually-triggered workflows from the default branch, so a workflow
+that only exists on a feature branch does not appear in the Actions tab at all
+and cannot be dispatched by API either. Merge first, then run.
+
+Add four repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret          | Value                                    |
+| --------------- | ---------------------------------------- |
+| `APPLE_TEAM_ID` | your 10-character Team ID                |
+| `ASC_KEY_ID`    | the API Key ID                           |
+| `ASC_ISSUER_ID` | the API Issuer ID                        |
+| `ASC_KEY_P8`    | the **whole contents** of the `.p8` file |
+
+Then run the **iOS build** workflow from the Actions tab and pick a
+`distribution`:
+
+- **adhoc** (default) - builds, signs for your registered devices, and
+  publishes the `.ipa` and its install manifest to a GitHub release tagged
+  `ios-adhoc`. The install link appears on the run's summary page. The tag is
+  reused on every build, so that link never changes.
+- **testflight** - builds, signs and uploads. Tick *skip upload* on the first
+  run if you only want to prove it compiles.
+
+The `.ipa` goes to a release rather than a branch because it is comfortably
+over GitHub's 100 MB limit for committed files - which is also why the Android
+APK's pattern of committing the binary does not carry over here.
+
+### Route B - EAS Build (if you already pay for Expo)
+
+EAS builds any native project, not just React Native ones, but BentoPDF does
+not fit its defaults: `ios/` is generated rather than committed, and Capacitor
+puts the Xcode project at `ios/App` instead of `ios/`. Both configs under
+`.eas/build/` are therefore custom build configs that spell out every step.
+
+The two profiles sign differently, because ad-hoc forces the issue:
+
+- **`ios-adhoc`** uses **EAS-managed credentials**, which internal distribution
+  requires. EAS creates the ad-hoc provisioning profile covering the devices
+  you registered, and then hosts the finished build behind an install URL - so
+  there is no manifest to host and no `itms-services://` link to paste.
+- **`ios-testflight`** reuses Route A's script and its App Store Connect API
+  key, since TestFlight needs no device list.
+
+```bash
+npm i -g eas-cli
+eas login
+eas init                     # writes the project ID into app.json
+
+# Ad-hoc: register each device once. EAS prints a URL to open on the phone,
+# or takes a UDID directly.
+eas device:create
+eas build --platform ios --profile ios-adhoc
+
+# TestFlight instead: the same four values Route A uses, as EAS secrets.
+eas secret:create --name APPLE_TEAM_ID --value <team id>
+eas secret:create --name ASC_KEY_ID    --value <key id>
+eas secret:create --name ASC_ISSUER_ID --value <issuer id>
+eas secret:create --name ASC_KEY_P8    --type file --value ./AuthKey_XXXXXX.p8
+eas build --platform ios --profile ios-testflight
+```
+
+Two adaptations in `.eas/build/ios-adhoc.yml` are worth knowing about, because
+both would otherwise fail well into a build:
+
+- **The Gymfile template is supplied by hand.** EAS's default emits the export
+  method as `ad-hoc`, which Apple deprecated in Xcode 15.4 and Xcode 26 rejects
+  outright ([eas-cli#4040](https://github.com/expo/eas-cli/issues/4040)). The
+  template here is EAS's default with that one value hardcoded to the current
+  spelling, `release-testing`. Older Xcode images still accept `ad-hoc`, which
+  is why plenty of EAS ad-hoc builds work without this.
+- **The template names the Xcode project.** EAS writes the Gymfile into `ios/`
+  and leaves fastlane to find the project beside it; Capacitor's is a directory
+  further down, at `ios/App`.
+
+The share extension needs its own provisioning profile, and EAS has to know it
+exists before the Xcode project has been generated. That is what the
+`extra.eas.build.experimental.ios.appExtensions` block in `app.json` is for -
+it declares the extension's target name, bundle ID and App Group entitlement.
+Without it the build fails to sign the extension.
+
+#### Running Route B from CI instead of your machine
+
+`eas build` does not have to run locally. Add an **`EXPO_TOKEN`** repository
+secret (expo.dev → account settings → access tokens) and the **EAS build**
+workflow drives it from Actions. The runner is `ubuntu-latest`, because the
+compile happens on Expo's macOS machines - the runner only uploads the project
+and gets a build URL back.
+
+One caveat decides how the first run goes: `--non-interactive` needs the iOS
+certificate and ad-hoc profile to **already exist on EAS's servers**, and
+creating them means talking to Apple. Two ways to satisfy that:
+
+- Add `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` and `APPLE_TEAM_ID` as
+  repository secrets - the same four Route A uses. The workflow hands them to
+  EAS as `EXPO_ASC_*`, which lets it create the credentials unattended.
+- Or run `eas build --profile ios-adhoc` locally once. After that the
+  credentials are stored and CI needs only `EXPO_TOKEN`.
+
+The workflow passes `--refresh-ad-hoc-provisioning-profile` for the ad-hoc
+profile, so devices registered since the last build are picked up; without it a
+newly-registered phone silently cannot install.
+
+On its first run the workflow also runs `eas init` to create the Expo project
+and prints the resulting `projectId` to the run summary - commit that into
+`app.json` and the step becomes a no-op.
+
+`.easignore` trims the upload from ~180 MB to ~127 MB by dropping tracked files
+an iOS build never reads, mostly the airgap bundle. Note that EAS *replaces*
+`.gitignore` with it rather than applying both, so it is a copy of `.gitignore`
+plus the extras - if you edit one, edit the other, or `node_modules` starts
+getting uploaded.
+
+Route A needs no Expo account and publishes its own install link; Route B gives
+you EAS's hosted install page and device management. Both produce the same app.
+
+### Getting an ad-hoc build onto a phone
+
+If you built through **EAS** (Route B), this is already done for you: the build
+page has an install URL and a QR code, and opening it on a registered device
+installs the app. The rest of this section is for Route A, which hosts nothing
+and so has to hand you the link itself.
+
+iOS will not install a `.ipa` you simply tap. It installs from an
+`itms-services://` link naming a manifest that describes the package, which is
+why the build emits a `manifest.plist` next to the `.ipa`.
+
+On the iPhone, open **Safari** and paste the link from the workflow run summary
+into the address bar:
+
+```
+itms-services://?action=download-manifest&url=https://github.com/<owner>/<repo>/releases/download/ios-adhoc/manifest.plist
+```
+
+It has to be Safari - an in-app browser will not hand the link to iOS. Then
+confirm the install prompt, and on first launch go to **Settings → General →
+VPN & Device Management** and trust the developer.
+
+If pasting a custom-scheme URL proves awkward, put a one-line HTML page with
+that link on any HTTPS host and tap it there instead; enabling GitHub Pages on
+this repository is enough.
+
+Two things make an install fail quietly: the device's UDID not being on the
+provisioning profile (register it, then re-run the build), and the build number
+not being higher than the installed one - the build stamps a UTC timestamp, so
+that only bites if you install two builds out of order.
+
+### Getting a TestFlight build onto a phone
+
+Processing takes 5-15 minutes after upload. Then in App Store Connect →
+TestFlight, add testers to **Internal Testing** (up to 100 people on your team,
+no Apple review) and they install through the TestFlight app. Internal builds
+expire after 90 days; re-run the workflow to refresh.
+
+Two things to know before you upload:
+
+- **Export compliance.** The build declares `ITSAppUsesNonExemptEncryption` as
+  false, on the basis that BentoPDF's PDF encryption is the standard algorithm
+  published in the PDF specification, which is exempt. That declaration is
+  yours to make, so change it in `scripts/native-patch-ios.mjs` if you disagree.
+- **Licensing.** BentoPDF is AGPL-3.0. Distributing an AGPL app through the App
+  Store has known friction with Apple's terms. Internal TestFlight testing
+  among people on your own team is a much narrower case than public release,
+  but it is worth understanding before you go further than that.
+
+---
+
 ## After you change the code
 
 ```bash
@@ -167,6 +402,66 @@ result is cached under `.native-cache/` and only regenerated when the upstream
 payload changes. At runtime the app decodes it with a 210 KB WASM brotli
 decoder instead of the browser's built-in gzip, which makes the _first_ Office
 conversion of a session slightly slower.
+
+## Android and iOS parity
+
+Both apps are the same web build inside the same Capacitor shell, so every
+tool, and the whole UI, is identical. What differs is only the OS integration,
+and only where the two platforms genuinely work differently:
+
+| Capability                    | Android                              | iOS                                        |
+| ----------------------------- | ------------------------------------ | ------------------------------------------ |
+| All 130+ tools, viewer, editor | yes                                  | yes                                        |
+| Opening a document from a file manager | intent filters, 12 MIME types | `CFBundleDocumentTypes`, the same 12 types |
+| Appearing in the share sheet   | `SEND` / `SEND_MULTIPLE` intent filters | a real Share Extension target        |
+| Saving a result               | system share sheet, then Documents   | share sheet, then Files → On My iPhone     |
+| Back navigation               | hardware back button                 | Back button in the app header              |
+| Status bar                    | WebView below it, tinted             | edge-to-edge with real safe-area insets    |
+| Keyboard                      | resizes the layout                   | resizes, accessory bar hidden              |
+| Haptics, splash, app icon     | yes                                  | yes                                        |
+
+Two differences are worth knowing about rather than treating as bugs:
+
+- **Back.** Android's hardware button also closes an open modal and needs a
+  double-press to quit; iOS has no hardware button, so the header's Back
+  button is the equivalent. Both reach the same places.
+- **Receiving a share.** Both platforms appear directly in the share sheet,
+  but by different machinery. Android declares `SEND` intent filters on the
+  main activity. iOS needs a separate Share Extension process, which is a
+  second Xcode target - see below. Android accepts multiple files at once
+  (`SEND_MULTIPLE`); the iOS extension takes one at a time.
+
+### How the iOS share extension works
+
+`ios/` is regenerated on every build, so the extension cannot be a thing you
+click together once in Xcode. `scripts/native-patch-ios.mjs` builds the target
+from the sources in `native/ios/`, and then checks its own work - the target
+type, the compiled sources, the embed phase, the target dependency and every
+file path a build setting points at - so a Capacitor template change fails here
+with a sentence rather than inside Xcode ten minutes into a CI run.
+
+The extension and the app are separate processes with separate storage, so a
+shared document travels like this:
+
+1. iOS hands the extension the file.
+2. It copies it into the App Group container both targets are entitled to.
+3. It opens `bentopdf://open?path=...` to wake the app.
+4. `src/js/native/open-with.ts` fetches that path through Capacitor's file
+   bridge and routes the document to the right tool.
+
+If step 3 fails, the extension says so rather than failing silently - the file
+is already in the shared container, so opening BentoPDF is a real recovery.
+
+One thing to know: opening the containing app from a share extension is done
+by walking the responder chain to reach `openURL:`, because an extension has
+no `UIApplication` of its own. It is the long-standing way to do this and is
+fine for TestFlight, but it is worth knowing it exists if you ever take the app
+further than internal testing.
+
+The iOS app is around 100 MB installed, the same payload the Android build
+carries; the 67 MB APK figure is its compressed download size.
+
+---
 
 ## Things worth knowing
 

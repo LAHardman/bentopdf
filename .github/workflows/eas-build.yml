@@ -1,0 +1,130 @@
+name: EAS build
+
+# Kicks off a build on Expo's macOS machines. The runner here only drives the
+# EAS CLI, so it does not need to be macOS itself - it uploads the project and
+# returns a build URL.
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'eas.json build profile'
+        type: choice
+        options:
+          - ios-adhoc
+          - ios-testflight
+        default: ios-adhoc
+
+concurrency:
+  group: eas-build
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HUSKY: 0
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Only needed the first time, or if EAS has to create or repair the iOS
+      # certificate and provisioning profile. Once those exist on EAS's servers
+      # subsequent builds reuse them and these are ignored.
+      - name: Provide Apple credentials for non-interactive credential work
+        env:
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+        run: |
+          set -euo pipefail
+          # The secrets context is not available in a step-level `if`, so the
+          # "was it provided" test lives here.
+          if [ -z "${ASC_KEY_P8:-}" ]; then
+            echo "No ASC key provided - EAS will need credentials to already exist."
+            exit 0
+          fi
+          mkdir -p "$HOME/.appstoreconnect"
+          KEY_PATH="$HOME/.appstoreconnect/AuthKey.p8"
+          printf '%s\n' "$ASC_KEY_P8" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          echo "EXPO_ASC_API_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      # app.json carries no projectId until a project exists on Expo. Doing it
+      # here means the first build needs nothing run locally; the id is printed
+      # below so it can be committed and this becomes a no-op.
+      - name: Link the Expo project
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if node -e "process.exit(require('./app.json').expo.extra?.eas?.projectId ? 0 : 1)"; then
+            echo "Already linked: $(node -p "require('./app.json').expo.extra.eas.projectId")"
+          else
+            eas init --non-interactive
+            echo "PROJECT_ID=$(node -p "require('./app.json').expo.extra.eas.projectId")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Start the build
+        id: build
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          EXPO_ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          EXPO_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          set -euo pipefail
+          # Devices registered since the last build are only picked up if the
+          # ad-hoc profile is refreshed, and that is internal-distribution only.
+          EXTRA=""
+          if [ "$PROFILE" = "ios-adhoc" ]; then
+            EXTRA="--refresh-ad-hoc-provisioning-profile"
+          fi
+
+          # --no-wait returns as soon as the build is queued: the build itself
+          # takes far longer than this job should sit spending runner minutes,
+          # and EAS's own page tracks it.
+          eas build --platform ios --profile "$PROFILE" \
+            --non-interactive --no-wait --json $EXTRA | tee build.json
+
+          # Field names in eas build --json have moved around between
+          # versions, so take whichever is present rather than betting on one.
+          echo "url=$(node -e "
+            const b = JSON.parse(require('fs').readFileSync('build.json','utf8'));
+            const first = Array.isArray(b) ? b[0] : b;
+            process.stdout.write(first?.buildUrl ?? first?.url ?? (first?.id ? 'https://expo.dev/builds/' + first.id : ''));
+          ")" >> "$GITHUB_OUTPUT"
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "## EAS build (${{ inputs.profile }})"
+            echo
+            if [ -n "${{ steps.build.outputs.url }}" ]; then
+              echo "Build page: ${{ steps.build.outputs.url }}"
+              echo
+              echo "When it finishes, that page carries the install link and QR code."
+              echo "Open it on a device whose UDID is registered, in Safari."
+            else
+              echo "The build did not start - see the step log above."
+            fi
+            if [ -n "${PROJECT_ID:-}" ]; then
+              echo
+              echo "First run: commit \`extra.eas.projectId\` = \`$PROJECT_ID\` into app.json."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

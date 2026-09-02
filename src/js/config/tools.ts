@@ -312,6 +312,13 @@ const baseCategories = [
         subtitle: 'Convert RTF (Rich Text Format) documents to PDF.',
       },
       {
+        href: import.meta.env.BASE_URL + 'view-pdf.html',
+        name: 'PDF Viewer',
+        icon: 'ph-book-open',
+        subtitle:
+          'Open a PDF and read it. Continuous scrolling and zoom, nothing else.',
+      },
+      {
         href: import.meta.env.BASE_URL + 'office-editor.html',
         name: 'Word Editor',
         icon: 'ph-pencil-simple-line',
