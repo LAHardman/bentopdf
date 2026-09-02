@@ -4,20 +4,19 @@
     "appVersionSource": "local"
   },
   "build": {
+    "ios-adhoc": {
+      "ios": {
+        "config": "ios-adhoc.yml"
+      },
+      "distribution": "internal"
+    },
     "ios-testflight": {
       "ios": {
         "config": "ios-release.yml"
       },
+      "distribution": "store",
       "env": {
         "DISTRIBUTION": "testflight"
-      }
-    },
-    "ios-adhoc": {
-      "ios": {
-        "config": "ios-release.yml"
-      },
-      "env": {
-        "DISTRIBUTION": "adhoc"
       }
     }
   }

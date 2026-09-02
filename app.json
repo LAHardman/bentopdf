@@ -5,7 +5,31 @@
     "version": "1.0.0",
     "platforms": ["ios"],
     "ios": {
-      "bundleIdentifier": "com.bentopdf.personal"
+      "bundleIdentifier": "com.bentopdf.personal",
+      "entitlements": {
+        "com.apple.security.application-groups": ["group.com.bentopdf.personal"]
+      }
+    },
+    "extra": {
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "ShareExtension",
+                  "bundleIdentifier": "com.bentopdf.personal.ShareExtension",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.bentopdf.personal"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   }
 }

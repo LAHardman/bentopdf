@@ -1,0 +1,73 @@
+# EAS custom build: ad-hoc ("internal distribution").
+#
+# Unlike the TestFlight config next to this one, signing here goes through
+# EAS-managed credentials, because that is what internal distribution requires:
+# EAS creates the ad-hoc provisioning profile covering the devices registered
+# with `eas device:create`, and hosts the finished build behind an install URL.
+#
+# Two adaptations are needed for a Capacitor project:
+#
+#   1. The Gymfile template is supplied by hand. EAS's default emits the export
+#      method as `ad-hoc`, which Apple deprecated in Xcode 15.4 and Xcode 26
+#      rejects outright (eas-cli#4040). This template is the default with that
+#      one value hardcoded to its current spelling, `release-testing`.
+#   2. EAS writes the Gymfile to `ios/` and expects the Xcode project beside
+#      it. Capacitor puts it at `ios/App`, so the template names it explicitly
+#      rather than leaving gym to guess.
+#
+# Run with:  eas build --platform ios --profile ios-adhoc
+build:
+  name: BentoPDF iOS -> internal distribution
+  steps:
+    - eas/checkout
+
+    - eas/install_node_modules
+
+    - run:
+        name: Build the web bundle and generate the Xcode project
+        command: ./scripts/ios-prepare.sh
+
+    - eas/resolve_apple_team_id_from_credentials:
+        id: team
+
+    # Installs the certificate and the ad-hoc profiles - one for the app, one
+    # for the share extension. The extension's profile only exists because
+    # app.json declares it under extra.eas.build.experimental.ios.appExtensions.
+    - eas/configure_ios_credentials
+
+    - eas/generate_gymfile_from_template:
+        inputs:
+          template: |
+            suppress_xcode_output(true)
+            clean(<%- CLEAN %>)
+
+            scheme("<%- SCHEME %>")
+            <% if (BUILD_CONFIGURATION) { %>
+            configuration("<%- BUILD_CONFIGURATION %>")
+            <% } %>
+
+            project("App/App.xcodeproj")
+
+            export_options({
+            method: "release-testing",
+            provisioningProfiles: {<% _.forEach(PROFILES, function(profile) { %>
+                "<%- profile.BUNDLE_ID %>" => "<%- profile.UUID %>",<% }); %>
+            }
+            })
+
+            export_xcargs "OTHER_CODE_SIGN_FLAGS=\"--keychain <%- KEYCHAIN_PATH %>\""
+
+            disable_xcpretty(true)
+            buildlog_path("<%- LOGS_DIRECTORY %>")
+
+            derived_data_path("<%- DERIVED_DATA_PATH %>")
+            result_bundle(true)
+            result_bundle_path("<%- RESULT_BUNDLE_PATH %>")
+
+            output_directory("<%- OUTPUT_DIRECTORY %>")
+
+    - eas/run_fastlane
+
+    # Publishes the build and, because the profile sets distribution: internal,
+    # gives it an install URL the registered devices can open directly.
+    - eas/find_and_upload_build_artifacts

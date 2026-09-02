@@ -147,11 +147,15 @@ template and wires up Swift Package Manager. Only the *compile* needs macOS.
    the one part the build cannot do for you: an App Group is account-level
    configuration, not something a build setting can create. Skipping it gives a
    signing failure naming the missing entitlement.
-4. **For ad-hoc: register the devices.** Certificates, Identifiers & Profiles
-   → Devices → **+**, with each iPhone's UDID. The build's provisioning
-   profile picks up every device registered on the team, so adding a tester
-   later means registering their UDID and re-running the build - nothing in
-   the repository changes.
+4. **For ad-hoc: register the devices.** Either in the portal (Certificates,
+   Identifiers & Profiles → Devices → **+**, with each iPhone's UDID) if you
+   are using Route A, or with `eas device:create` if you are using Route B,
+   which walks the phone through it. The provisioning profile picks up every
+   registered device, so adding a tester later means registering their UDID
+   and re-running the build - nothing in the repository changes.
+
+   Route B does not need the App Store Connect API key from step 1 at all;
+   EAS manages the ad-hoc credentials itself.
 5. **For TestFlight only: an app record.** App Store Connect → Apps → **+** →
    New App, with bundle ID `com.bentopdf.personal`. Ad-hoc does not need one.
 
@@ -200,32 +204,64 @@ APK's pattern of committing the binary does not carry over here.
 
 EAS builds any native project, not just React Native ones, but BentoPDF does
 not fit its defaults: `ios/` is generated rather than committed, and Capacitor
-puts the Xcode project at `ios/App` instead of `ios/`. So `.eas/build/ios-release.yml`
-is a custom build config that spells out every step and calls the same script
-Route A does, using the same API key rather than EAS-managed credentials.
+puts the Xcode project at `ios/App` instead of `ios/`. Both configs under
+`.eas/build/` are therefore custom build configs that spell out every step.
 
-Sidestepping EAS's own build functions is deliberate for ad-hoc:
-`eas/generate_gymfile_from_template` still emits the export method as `ad-hoc`,
-which Apple deprecated in Xcode 15.4 and Xcode 26 rejects outright
-([eas-cli#4040](https://github.com/expo/eas-cli/issues/4040)). The script here
-uses the current spelling, `release-testing`.
+The two profiles sign differently, because ad-hoc forces the issue:
+
+- **`ios-adhoc`** uses **EAS-managed credentials**, which internal distribution
+  requires. EAS creates the ad-hoc provisioning profile covering the devices
+  you registered, and then hosts the finished build behind an install URL - so
+  there is no manifest to host and no `itms-services://` link to paste.
+- **`ios-testflight`** reuses Route A's script and its App Store Connect API
+  key, since TestFlight needs no device list.
 
 ```bash
 npm i -g eas-cli
 eas login
-eas init                                    # writes the project ID into app.json
+eas init                     # writes the project ID into app.json
+
+# Ad-hoc: register each device once. EAS prints a URL to open on the phone,
+# or takes a UDID directly.
+eas device:create
+eas build --platform ios --profile ios-adhoc
+
+# TestFlight instead: the same four values Route A uses, as EAS secrets.
 eas secret:create --name APPLE_TEAM_ID --value <team id>
 eas secret:create --name ASC_KEY_ID    --value <key id>
 eas secret:create --name ASC_ISSUER_ID --value <issuer id>
 eas secret:create --name ASC_KEY_P8    --type file --value ./AuthKey_XXXXXX.p8
-eas build --platform ios --profile ios-adhoc       # or ios-testflight
+eas build --platform ios --profile ios-testflight
 ```
 
-Route A is the better-trodden path for a Capacitor app, and it is the one that
-publishes the ad-hoc install link. Route B exists so a paid Expo account is not
-wasted; it produces the same `.ipa` but leaves hosting it to you.
+Two adaptations in `.eas/build/ios-adhoc.yml` are worth knowing about, because
+both would otherwise fail well into a build:
+
+- **The Gymfile template is supplied by hand.** EAS's default emits the export
+  method as `ad-hoc`, which Apple deprecated in Xcode 15.4 and Xcode 26 rejects
+  outright ([eas-cli#4040](https://github.com/expo/eas-cli/issues/4040)). The
+  template here is EAS's default with that one value hardcoded to the current
+  spelling, `release-testing`. Older Xcode images still accept `ad-hoc`, which
+  is why plenty of EAS ad-hoc builds work without this.
+- **The template names the Xcode project.** EAS writes the Gymfile into `ios/`
+  and leaves fastlane to find the project beside it; Capacitor's is a directory
+  further down, at `ios/App`.
+
+The share extension needs its own provisioning profile, and EAS has to know it
+exists before the Xcode project has been generated. That is what the
+`extra.eas.build.experimental.ios.appExtensions` block in `app.json` is for -
+it declares the extension's target name, bundle ID and App Group entitlement.
+Without it the build fails to sign the extension.
+
+Route A needs no Expo account and publishes its own install link; Route B gives
+you EAS's hosted install page and device management. Both produce the same app.
 
 ### Getting an ad-hoc build onto a phone
+
+If you built through **EAS** (Route B), this is already done for you: the build
+page has an install URL and a QR code, and opening it on a registered device
+installs the app. The rest of this section is for Route A, which hosts nothing
+and so has to hand you the link itself.
 
 iOS will not install a `.ipa` you simply tap. It installs from an
 `itms-services://` link naming a manifest that describes the package, which is

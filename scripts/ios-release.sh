@@ -58,16 +58,7 @@ chmod 600 "$KEY_PATH"
 # The key is a credential; do not leave it behind on a shared runner.
 trap 'rm -f "$KEY_PATH"' EXIT
 
-echo "--- Building the web bundle (brotli recompression is the slow part) ---"
-npm run native:build
-
-echo "--- Generating the iOS project ---"
-if [ -d "$WORKSPACE_DIR/App.xcodeproj" ]; then
-  npx cap sync ios
-else
-  npx cap add ios
-fi
-node scripts/native-patch-ios.mjs
+./scripts/ios-prepare.sh
 
 echo "--- Archiving for $DISTRIBUTION (build $BUILD_NUMBER) ---"
 rm -rf "$ARCHIVE" "$EXPORT_DIR"
