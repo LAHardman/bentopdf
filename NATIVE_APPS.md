@@ -253,6 +253,12 @@ exists before the Xcode project has been generated. That is what the
 it declares the extension's target name, bundle ID and App Group entitlement.
 Without it the build fails to sign the extension.
 
+`.easignore` trims the upload from ~180 MB to ~127 MB by dropping tracked files
+an iOS build never reads, mostly the airgap bundle. Note that EAS *replaces*
+`.gitignore` with it rather than applying both, so it is a copy of `.gitignore`
+plus the extras - if you edit one, edit the other, or `node_modules` starts
+getting uploaded.
+
 Route A needs no Expo account and publishes its own install link; Route B gives
 you EAS's hosted install page and device management. Both produce the same app.
 
