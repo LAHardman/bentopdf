@@ -14,6 +14,7 @@
  * handoff to carry the blob across the page change.
  */
 import {
+  HANDOFF_PARAM,
   handoffUrl,
   putHandoff,
 } from '../utils/document-handoff.js';
@@ -136,6 +137,38 @@ const receive = async (url: string): Promise<void> => {
   }
 };
 
+/** Remembers the launch URL we have already acted on, for this app run. */
+const LAUNCH_HANDLED_KEY = 'bentopdf:launch-handled';
+
+/**
+ * True the first time it is asked about a given launch URL, false after.
+ *
+ * `getLaunchUrl` reports the intent the *activity* was started with, and that
+ * intent does not change when the WebView navigates. So opening a document
+ * navigates to the tool page, the tool page starts up, asks again, gets the
+ * same URL, and navigates again - forever, with the "Opening document" toast
+ * flashing on each pass and the native shell never surviving long enough to
+ * render.
+ *
+ * sessionStorage is exactly the right lifetime: it dies with the WebView, so
+ * launching the app again on the same file is correctly treated as new.
+ */
+const claimLaunchUrl = (url: string): boolean => {
+  // A page reached through the handoff is downstream of a launch that was
+  // already acted on. Cheap second line of defence for when storage throws.
+  if (new URLSearchParams(window.location.search).has(HANDOFF_PARAM)) {
+    return false;
+  }
+
+  try {
+    if (sessionStorage.getItem(LAUNCH_HANDLED_KEY) === url) return false;
+    sessionStorage.setItem(LAUNCH_HANDLED_KEY, url);
+  } catch {
+    // Storage unavailable. The check above still covers the loop.
+  }
+  return true;
+};
+
 export const initOpenWith = async (): Promise<void> => {
   if (!isNativeApp()) return;
 
@@ -147,9 +180,10 @@ export const initOpenWith = async (): Promise<void> => {
 
   // Launched by a document.
   const launch = await App.getLaunchUrl().catch((): undefined => undefined);
-  if (launch?.url) await receive(launch.url);
+  if (launch?.url && claimLaunchUrl(launch.url)) await receive(launch.url);
 
-  // Handed a document while already running.
+  // Handed a document while already running. Not guarded: each of these is a
+  // fresh, deliberate share, even if it is the same file twice.
   App.addListener('appUrlOpen', (event): void => void receive(event.url)).catch(
     () => {}
   );
