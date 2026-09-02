@@ -1313,5 +1313,17 @@
     "faqSinglePageAnswer": "Yes! Enable the \"Loop\" option and your overlay PDF pages will repeat across all base pages. A single-page watermark will apply to every page.",
     "faqPrivacyQuestion": "Are my files private and secure?",
     "faqPrivacyAnswer": "Absolutely! All processing happens in your browser. Your files never leave your device, ensuring complete privacy."
+  },
+  "viewPdf": {
+    "name": "PDF Viewer",
+    "subtitle": "Open a PDF and read it. Continuous scrolling and zoom, nothing else."
+  },
+  "officeViewer": {
+    "name": "Office Viewer",
+    "subtitle": "View Word, Excel and PowerPoint documents, and convert them."
+  },
+  "officeEditor": {
+    "name": "Word Editor",
+    "subtitle": "Edit Word documents: type, format, and save back to .docx."
   }
 }

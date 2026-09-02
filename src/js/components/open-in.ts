@@ -126,10 +126,12 @@ export const mountOpenIn = ({
   const button = document.createElement('button');
   button.id = 'open-in-button';
   button.type = 'button';
+  // The label is not optional on a phone. As an icon alone this was simply
+  // not found - nothing about a share glyph says "run another tool on this".
   button.className =
-    'btn bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg flex items-center gap-2 whitespace-nowrap';
+    'btn bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-3 py-2 rounded-lg flex items-center gap-2 whitespace-nowrap shrink-0';
   button.innerHTML =
-    '<i data-lucide="share-2" class="w-4 h-4"></i><span class="hidden sm:inline">Open in…</span>';
+    '<i data-lucide="wand-2" class="w-4 h-4"></i><span>Open in…</span>';
   container.appendChild(button);
   // lucide-init already ran on DOMContentLoaded, so this icon needs its own pass.
   void import('lucide').then(({ createIcons, icons }) => createIcons({ icons }));

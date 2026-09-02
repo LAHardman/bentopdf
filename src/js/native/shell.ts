@@ -108,6 +108,23 @@ const navigateTo = (page: string): void => {
   window.location.href = `/${page}`;
 };
 
+/**
+ * Publishes the header's real height as --n-header-offset.
+ *
+ * A sticky toolbar underneath it cannot use a fixed number: the height varies
+ * with the status-bar inset and the platform, and changes again when the large
+ * title collapses on scroll. Measuring is the only thing that stays correct.
+ */
+const publishHeaderOffset = (header: HTMLElement): void => {
+  const height = Math.round(header.getBoundingClientRect().height);
+  if (height > 0) {
+    document.documentElement.style.setProperty(
+      '--n-header-offset',
+      `${height}px`
+    );
+  }
+};
+
 const buildHeader = (): HTMLElement => {
   const header = document.createElement('header');
   header.className = 'native-header';
@@ -220,6 +237,7 @@ const trackScroll = (header: HTMLElement): void => {
   let ticking = false;
   const update = (): void => {
     header.classList.toggle('is-scrolled', window.scrollY > 12);
+    publishHeaderOffset(header);
     ticking = false;
   };
   window.addEventListener(
@@ -231,6 +249,8 @@ const trackScroll = (header: HTMLElement): void => {
     },
     { passive: true }
   );
+  // Rotating the phone changes the header's height and its safe-area inset.
+  window.addEventListener('resize', update, { passive: true });
   update();
 };
 

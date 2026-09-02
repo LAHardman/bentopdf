@@ -324,65 +324,66 @@ const initPinchZoom = (): void => {
   const scroller = $('pages-scroll');
   const pages = $('pages');
 
-  const active = new Map<number, { x: number; y: number }>();
   let startSpread = 0;
   let startZoom = 1;
   let focus = { x: 0, y: 0 };
   let ratio = 1;
 
-  const spread = (): number => {
-    const [a, b] = [...active.values()];
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  };
-  const midpoint = (): { x: number; y: number } => {
-    const [a, b] = [...active.values()];
-    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-  };
+  const spread = (touches: TouchList): number =>
+    Math.hypot(
+      touches[0].clientX - touches[1].clientX,
+      touches[0].clientY - touches[1].clientY
+    );
+  const midpoint = (touches: TouchList): { x: number; y: number } => ({
+    x: (touches[0].clientX + touches[1].clientX) / 2,
+    y: (touches[0].clientY + touches[1].clientY) / 2,
+  });
 
-  const endGesture = (): void => {
+  const commit = (): void => {
     if (!startSpread) return;
     startSpread = 0;
     pages.style.transform = '';
     pages.style.transformOrigin = '';
-    // The browser owns scrolling again the moment we are not pinching.
     scroller.style.touchAction = '';
     setZoom(startZoom * ratio, focus);
     ratio = 1;
   };
 
+  // Touch events rather than pointer events, deliberately. With pointers, the
+  // browser has already claimed the first finger for scrolling by the time the
+  // second arrives, and it answers by cancelling the pointer - which ended the
+  // gesture a frame after it began, so a pinch of any size only ever moved the
+  // zoom by the little it had managed to measure. A touch event carries every
+  // finger at once and preventDefault on it actually stops the scroll.
   scroller.addEventListener(
-    'pointerdown',
+    'touchstart',
     (event) => {
-      if (event.pointerType === 'mouse') return;
-      active.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (active.size === 2) {
-        startSpread = spread();
-        startZoom = state.zoom;
-        focus = midpoint();
-        ratio = 1;
-        // Stop the WebView trying to scroll or zoom underneath the gesture.
-        scroller.style.touchAction = 'none';
-      }
+      if (event.touches.length !== 2) return;
+      startSpread = spread(event.touches);
+      startZoom = state.zoom;
+      focus = midpoint(event.touches);
+      ratio = 1;
+      scroller.style.touchAction = 'none';
+      event.preventDefault();
     },
-    { passive: true }
+    { passive: false }
   );
 
   scroller.addEventListener(
-    'pointermove',
+    'touchmove',
     (event) => {
-      if (!active.has(event.pointerId)) return;
-      active.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (active.size !== 2 || !startSpread) return;
-
+      if (!startSpread) return;
+      if (event.touches.length !== 2) return;
       event.preventDefault();
-      const next = spread() / startSpread;
-      // Clamp against the same limits the commit uses, so the preview cannot
-      // promise a zoom that setZoom then refuses.
+
+      // Clamp here too, so the preview cannot promise a zoom the commit
+      // then refuses and snaps back from.
       const target = Math.min(
-        Math.max(startZoom * next, MIN_ZOOM),
+        Math.max((startZoom * spread(event.touches)) / startSpread, MIN_ZOOM),
         MAX_ZOOM
       );
       ratio = target / startZoom;
+      focus = midpoint(event.touches);
 
       const box = pages.getBoundingClientRect();
       pages.style.transformOrigin = `${focus.x - box.left}px ${focus.y - box.top}px`;
@@ -391,14 +392,13 @@ const initPinchZoom = (): void => {
     { passive: false }
   );
 
-  for (const type of ['pointerup', 'pointercancel', 'pointerleave'] as const) {
+  for (const type of ['touchend', 'touchcancel'] as const) {
     scroller.addEventListener(type, (event) => {
-      active.delete(event.pointerId);
-      if (active.size < 2) endGesture();
+      if (event.touches.length < 2) commit();
     });
   }
 
-  // Trackpad pinch and ctrl+wheel arrive as wheel events, not pointers.
+  // Trackpad pinch and ctrl+wheel arrive as wheel events, not touches.
   scroller.addEventListener(
     'wheel',
     (event) => {
