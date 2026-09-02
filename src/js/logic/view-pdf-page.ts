@@ -326,7 +326,10 @@ const initPinchZoom = (): void => {
 
   let startSpread = 0;
   let startZoom = 1;
+  /** Where the fingers started, in client coordinates. Fixed for the gesture. */
   let focus = { x: 0, y: 0 };
+  /** The same point in the column's own untransformed coordinates. */
+  let origin = { x: 0, y: 0 };
   let ratio = 1;
 
   const spread = (touches: TouchList): number =>
@@ -363,6 +366,16 @@ const initPinchZoom = (): void => {
       startZoom = state.zoom;
       focus = midpoint(event.touches);
       ratio = 1;
+
+      // Measured once, and only here, where the column is still untransformed.
+      // transform-origin is expressed in the element's own unscaled
+      // coordinates, so a rect that already includes a scale gives the wrong
+      // point - and re-measuring every frame fed each frame's error into the
+      // next, which is what walked the page off the screen mid-pinch.
+      const box = pages.getBoundingClientRect();
+      origin = { x: focus.x - box.left, y: focus.y - box.top };
+      pages.style.transformOrigin = `${origin.x}px ${origin.y}px`;
+
       scroller.style.touchAction = 'none';
       event.preventDefault();
     },
@@ -383,10 +396,9 @@ const initPinchZoom = (): void => {
         MAX_ZOOM
       );
       ratio = target / startZoom;
-      focus = midpoint(event.touches);
 
-      const box = pages.getBoundingClientRect();
-      pages.style.transformOrigin = `${focus.x - box.left}px ${focus.y - box.top}px`;
+      // Scale about the point the gesture started on. The origin stays put, so
+      // that point stays under the fingers for the whole pinch.
       pages.style.transform = `scale(${ratio})`;
     },
     { passive: false }
