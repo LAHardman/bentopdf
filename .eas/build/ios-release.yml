@@ -4,6 +4,7 @@
 # build is the same script the GitHub Actions runner uses.
 #
 # Run with:  eas build --platform ios --profile ios-testflight
+#       or:  eas build --platform ios --profile ios-adhoc
 build:
   name: BentoPDF iOS -> TestFlight
   steps:
@@ -27,7 +28,7 @@ build:
           if [ -f "${ASC_KEY_P8:-}" ]; then
             export ASC_KEY_P8="$(cat "$ASC_KEY_P8")"
           fi
-          ./scripts/ios-testflight.sh
+          ./scripts/ios-release.sh
 
     - eas/upload_artifact:
         name: Upload the .ipa

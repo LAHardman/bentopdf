@@ -263,34 +263,59 @@ ${buildable}
 // ------------------------------------------------------------ export options
 
 /**
- * `xcodebuild -exportArchive` refuses to run without this. app-store-connect
- * is the method TestFlight wants; uploading is a separate step so a failed
- * upload does not mean rebuilding.
+ * `xcodebuild -exportArchive` refuses to run without one of these.
+ *
+ * Two, because the two ways of getting the app onto a phone want different
+ * export methods: TestFlight goes through App Store Connect, ad-hoc
+ * ("internal distribution") signs for a fixed list of registered devices and
+ * is installed over the air with no review and no processing wait.
+ *
+ * `release-testing` is what ad-hoc is called now. Apple deprecated the name
+ * `ad-hoc` in Xcode 15.4 and Xcode 26 rejects it outright, which is worth
+ * knowing because some tooling still emits the old spelling.
  */
-if (fs.existsSync(exportOptionsPath)) {
-  console.log('[native-patch] ExportOptions.plist already present.');
-} else {
+const EXPORT_OPTIONS = [
+  {
+    file: 'ExportOptions.plist',
+    method: 'app-store-connect',
+    // Symbols are only useful where Apple symbolicates crash reports.
+    uploadSymbols: true,
+  },
+  {
+    file: 'ExportOptions-adhoc.plist',
+    method: 'release-testing',
+    uploadSymbols: false,
+  },
+];
+
+for (const { file, method, uploadSymbols } of EXPORT_OPTIONS) {
+  const target = path.join(iosDir, file);
+  if (fs.existsSync(target)) {
+    console.log(`[native-patch] ${file} already present.`);
+    continue;
+  }
+
   fs.writeFileSync(
-    exportOptionsPath,
+    target,
     `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
 	<key>method</key>
-	<string>app-store-connect</string>
+	<string>${method}</string>
 	<key>destination</key>
 	<string>export</string>
 	<key>signingStyle</key>
 	<string>automatic</string>
 	<key>uploadSymbols</key>
-	<true/>
+	<${uploadSymbols}/>
 	<key>manageAppVersionAndBuildNumber</key>
 	<false/>
 </dict>
 </plist>
 `
   );
-  console.log('[native-patch] Wrote ExportOptions.plist.');
+  console.log(`[native-patch] Wrote ${file} (${method}).`);
 }
 
 // ---------------------------------------------------------- share extension -

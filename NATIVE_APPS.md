@@ -108,12 +108,24 @@ sideloading, not something the project can work around.
 
 ---
 
-## iOS without a Mac (TestFlight)
+## iOS without a Mac
 
 Everything above needs a Mac. If you have a paid Apple Developer account you
-can skip owning one: the build runs on a hosted macOS machine and lands in
-TestFlight, which installs on any iPhone from a link with no cable, no Xcode
-and no 7-day expiry.
+can skip owning one: the build runs on a hosted macOS machine, and the result
+installs on an iPhone with no cable, no Xcode and no 7-day expiry.
+
+There are two ways to get it there, and the workflow takes either:
+
+| | **Ad-hoc** (internal distribution) | **TestFlight** |
+| --- | --- | --- |
+| Who can install | only devices whose UDID you registered | up to 100 testers on your team |
+| Apple review | none | none for internal testing |
+| Wait after building | none | 5-15 minutes of processing |
+| App Store Connect record | not needed | needed |
+| How it installs | an `itms-services://` link opened in Safari | the TestFlight app |
+| Build expires | when the profile does (a year) | 90 days |
+
+Ad-hoc is the shorter loop, so it is the workflow's default.
 
 The iOS project itself generates fine on Linux - `cap add ios` only unpacks a
 template and wires up Swift Package Manager. Only the *compile* needs macOS.
@@ -135,8 +147,13 @@ template and wires up Swift Package Manager. Only the *compile* needs macOS.
    the one part the build cannot do for you: an App Group is account-level
    configuration, not something a build setting can create. Skipping it gives a
    signing failure naming the missing entitlement.
-4. **An app record.** App Store Connect → Apps → **+** → New App, with bundle
-   ID `com.bentopdf.personal`.
+4. **For ad-hoc: register the devices.** Certificates, Identifiers & Profiles
+   → Devices → **+**, with each iPhone's UDID. The build's provisioning
+   profile picks up every device registered on the team, so adding a tester
+   later means registering their UDID and re-running the build - nothing in
+   the repository changes.
+5. **For TestFlight only: an app record.** App Store Connect → Apps → **+** →
+   New App, with bundle ID `com.bentopdf.personal`. Ad-hoc does not need one.
 
 Changing the bundle ID in `capacitor.config.ts` is fine — the extension's ID
 and the App Group are both derived from it, so use `<your id>.ShareExtension`
@@ -165,17 +182,33 @@ Add four repository secrets (Settings → Secrets and variables → Actions):
 | `ASC_ISSUER_ID` | the API Issuer ID                        |
 | `ASC_KEY_P8`    | the **whole contents** of the `.p8` file |
 
-Then run the **iOS TestFlight** workflow from the Actions tab. It builds,
-signs, uploads, and also attaches the `.ipa` as a workflow artifact. Tick
-*skip upload* on the first run if you just want to prove the build compiles.
+Then run the **iOS build** workflow from the Actions tab and pick a
+`distribution`:
+
+- **adhoc** (default) - builds, signs for your registered devices, and
+  publishes the `.ipa` and its install manifest to a GitHub release tagged
+  `ios-adhoc`. The install link appears on the run's summary page. The tag is
+  reused on every build, so that link never changes.
+- **testflight** - builds, signs and uploads. Tick *skip upload* on the first
+  run if you only want to prove it compiles.
+
+The `.ipa` goes to a release rather than a branch because it is comfortably
+over GitHub's 100 MB limit for committed files - which is also why the Android
+APK's pattern of committing the binary does not carry over here.
 
 ### Route B - EAS Build (if you already pay for Expo)
 
 EAS builds any native project, not just React Native ones, but BentoPDF does
 not fit its defaults: `ios/` is generated rather than committed, and Capacitor
-puts the Xcode project at `ios/App` instead of `ios/`. So `.eas/build/ios-testflight.yml`
+puts the Xcode project at `ios/App` instead of `ios/`. So `.eas/build/ios-release.yml`
 is a custom build config that spells out every step and calls the same script
 Route A does, using the same API key rather than EAS-managed credentials.
+
+Sidestepping EAS's own build functions is deliberate for ad-hoc:
+`eas/generate_gymfile_from_template` still emits the export method as `ad-hoc`,
+which Apple deprecated in Xcode 15.4 and Xcode 26 rejects outright
+([eas-cli#4040](https://github.com/expo/eas-cli/issues/4040)). The script here
+uses the current spelling, `release-testing`.
 
 ```bash
 npm i -g eas-cli
@@ -185,18 +218,45 @@ eas secret:create --name APPLE_TEAM_ID --value <team id>
 eas secret:create --name ASC_KEY_ID    --value <key id>
 eas secret:create --name ASC_ISSUER_ID --value <issuer id>
 eas secret:create --name ASC_KEY_P8    --type file --value ./AuthKey_XXXXXX.p8
-eas build --platform ios --profile ios-testflight
+eas build --platform ios --profile ios-adhoc       # or ios-testflight
 ```
 
-Route A is the better-trodden path for a Capacitor app; Route B exists so a
-paid Expo account is not wasted. Both produce an identical build.
+Route A is the better-trodden path for a Capacitor app, and it is the one that
+publishes the ad-hoc install link. Route B exists so a paid Expo account is not
+wasted; it produces the same `.ipa` but leaves hosting it to you.
 
-### Getting it onto a phone
+### Getting an ad-hoc build onto a phone
 
-TestFlight processing takes 5-15 minutes after upload. Then in App Store
-Connect → TestFlight, add testers to **Internal Testing** (up to 100 people on
-your team, no Apple review) and they install it through the TestFlight app.
-Internal builds expire after 90 days; re-run the workflow to refresh.
+iOS will not install a `.ipa` you simply tap. It installs from an
+`itms-services://` link naming a manifest that describes the package, which is
+why the build emits a `manifest.plist` next to the `.ipa`.
+
+On the iPhone, open **Safari** and paste the link from the workflow run summary
+into the address bar:
+
+```
+itms-services://?action=download-manifest&url=https://github.com/<owner>/<repo>/releases/download/ios-adhoc/manifest.plist
+```
+
+It has to be Safari - an in-app browser will not hand the link to iOS. Then
+confirm the install prompt, and on first launch go to **Settings → General →
+VPN & Device Management** and trust the developer.
+
+If pasting a custom-scheme URL proves awkward, put a one-line HTML page with
+that link on any HTTPS host and tap it there instead; enabling GitHub Pages on
+this repository is enough.
+
+Two things make an install fail quietly: the device's UDID not being on the
+provisioning profile (register it, then re-run the build), and the build number
+not being higher than the installed one - the build stamps a UTC timestamp, so
+that only bites if you install two builds out of order.
+
+### Getting a TestFlight build onto a phone
+
+Processing takes 5-15 minutes after upload. Then in App Store Connect →
+TestFlight, add testers to **Internal Testing** (up to 100 people on your team,
+no Apple review) and they install through the TestFlight app. Internal builds
+expire after 90 days; re-run the workflow to refresh.
 
 Two things to know before you upload:
 

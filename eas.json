@@ -6,7 +6,18 @@
   "build": {
     "ios-testflight": {
       "ios": {
-        "config": "ios-testflight.yml"
+        "config": "ios-release.yml"
+      },
+      "env": {
+        "DISTRIBUTION": "testflight"
+      }
+    },
+    "ios-adhoc": {
+      "ios": {
+        "config": "ios-release.yml"
+      },
+      "env": {
+        "DISTRIBUTION": "adhoc"
       }
     }
   }
