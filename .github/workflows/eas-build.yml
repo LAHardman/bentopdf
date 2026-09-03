@@ -28,10 +28,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # eas-cli needs Node 22 or newer - its @oclif/plugin-autocomplete
+      # dependency refuses to install on 20, which is what the repo's other
+      # workflows use. The project itself is unaffected: the actual build runs
+      # on Expo's machines, and this runner only drives the CLI.
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Setup EAS
