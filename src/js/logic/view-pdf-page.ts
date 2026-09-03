@@ -81,6 +81,20 @@ const showError = (message: string): void => {
 const scale = (): number => state.fitScale * state.zoom;
 
 /**
+ * Sizes the scroller to the space under the toolbar.
+ *
+ * Without a bounded height it is as tall as its content, so it never
+ * overflows vertically and the document ends up owning that axis instead -
+ * which is what split panning across two scrollers.
+ */
+const fitViewerHeight = (): void => {
+  const scroller = $('pages-scroll');
+  scroller.style.height = '';
+  const top = scroller.getBoundingClientRect().top;
+  scroller.style.height = `${Math.max(window.innerHeight - top, 200)}px`;
+};
+
+/**
  * Scale that fits the widest page to the viewport, with a little margin.
  * Measured on the scroller: the page column itself is min-w-max, so its own
  * width is whatever the content needs rather than what is on screen.
@@ -161,17 +175,19 @@ const renderPage = async (slot: PageSlot): Promise<void> => {
 const updateVisible = (): void => {
   if (!state.slots.length) return;
 
-  const margin = window.innerHeight * OVERSCAN;
+  const view = $('pages-scroll').getBoundingClientRect();
+  const margin = view.height * OVERSCAN;
   let firstVisible = state.current;
 
   for (const slot of state.slots) {
     const box = slot.element.getBoundingClientRect();
-    const near = box.bottom > -margin && box.top < window.innerHeight + margin;
+    const near =
+      box.bottom > view.top - margin && box.top < view.bottom + margin;
 
     if (near && !slot.rendered) void renderPage(slot);
     else if (!near && slot.rendered) release(slot);
 
-    if (box.top <= window.innerHeight / 2 && box.bottom > 0) {
+    if (box.top <= view.top + view.height / 2 && box.bottom > view.top) {
       firstVisible = slot.index + 1;
     }
   }
@@ -205,9 +221,10 @@ const setZoom = (zoom: number, focus?: { x: number; y: number }): void => {
 
   // Where the focal point sits in unscaled page coordinates, before the change.
   const before = pages.getBoundingClientRect();
+  const view = scroller.getBoundingClientRect();
   const anchor = focus ?? {
-    x: before.left + scroller.clientWidth / 2,
-    y: window.innerHeight / 2,
+    x: view.left + scroller.clientWidth / 2,
+    y: view.top + scroller.clientHeight / 2,
   };
   const previous = scale();
   const contentX = (anchor.x - before.left) / previous;
@@ -222,8 +239,10 @@ const setZoom = (zoom: number, focus?: { x: number; y: number }): void => {
   // Measure again rather than predict: the scroller clamps, and the column is
   // centred, so the new origin is not simply the old one times the ratio.
   const after = pages.getBoundingClientRect();
+  // The axes are independent, so both corrections come from the one
+  // measurement above.
   scroller.scrollLeft += after.left + contentX * scale() - anchor.x;
-  window.scrollBy(0, after.top + contentY * scale() - anchor.y);
+  scroller.scrollTop += after.top + contentY * scale() - anchor.y;
 
   updateVisible();
 };
@@ -283,6 +302,10 @@ const openFile = async (file: File): Promise<void> => {
     $('doc-name').textContent = `${file.name} · ${formatBytes(file.size)}`;
     $('page-indicator').textContent = `1 / ${doc.numPages}`;
 
+    // Bound the scroller before measuring the fit: it decides both the
+    // visible height and whether this element, rather than the document,
+    // owns vertical scrolling.
+    fitViewerHeight();
     state.fitScale = fitScaleFor(widest);
 
     layoutPages();
@@ -300,6 +323,7 @@ const closeDocument = (): void => {
   state.slots = [];
   state.file = null;
   $('pages').textContent = '';
+  $('pages-scroll').style.height = '';
   $('viewer').classList.add('hidden');
   $('uploader').classList.remove('hidden');
   $<HTMLInputElement>('file-input').value = '';
@@ -450,9 +474,10 @@ const init = (): void => {
     if (file) void openFile(file);
   });
 
-  window.addEventListener('scroll', onScroll, { passive: true });
+  $('pages-scroll').addEventListener('scroll', onScroll, { passive: true });
   window.addEventListener('resize', () => {
     if (!state.slots.length) return;
+    fitViewerHeight();
     const widest = state.slots.reduce((max, s) => Math.max(max, s.width), 1);
     state.fitScale = fitScaleFor(widest);
     for (const slot of state.slots) release(slot);

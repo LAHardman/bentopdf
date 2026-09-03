@@ -78,7 +78,10 @@ jobs:
           if node -e "process.exit(require('./app.json').expo.extra?.eas?.projectId ? 0 : 1)"; then
             echo "Already linked: $(node -p "require('./app.json').expo.extra.eas.projectId")"
           else
-            eas init --non-interactive
+            # --force creates the project rather than only linking to one
+            # that already exists; without it the first run cannot get off the
+            # ground ("Project does not exist: @owner/slug").
+            eas init --non-interactive --force
             echo "PROJECT_ID=$(node -p "require('./app.json').expo.extra.eas.projectId")" >> "$GITHUB_ENV"
           fi
 

@@ -152,11 +152,19 @@
       </div>
 
       <!--
-        Pages are placeholders until they scroll into view. The outer element
-        scrolls horizontally when zoomed past the viewport width; the inner one
-        is min-w-max so centring never clips the left edge of a wide page.
+        Pages are placeholders until they scroll into view.
+
+        This element owns *both* scroll axes, and its height is set to the
+        space left below the toolbar. That matters for panning: when the
+        document scrolled vertically and this only scrolled horizontally,
+        they were two separate scrollers, and a touch drag has to pick one -
+        so a diagonal drag moved in a straight line. One scroller with both
+        axes pans freely.
+
+        The inner element is min-w-max so centring never clips the left edge
+        of a wide page.
       -->
-      <div id="pages-scroll" class="overflow-x-auto">
+      <div id="pages-scroll" class="overflow-auto overscroll-contain">
         <div
           id="pages"
           class="flex flex-col items-center gap-4 py-4 px-2 min-w-max"
