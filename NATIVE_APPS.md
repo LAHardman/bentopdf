@@ -234,6 +234,25 @@ eas secret:create --name ASC_KEY_P8    --type file --value ./AuthKey_XXXXXX.p8
 eas build --platform ios --profile ios-testflight
 ```
 
+Four things this actually needed, found by running it rather than by reading
+the docs:
+
+- **Node 22 on the runner.** eas-cli 23 will not install on Node 20 - its
+  `@oclif/plugin-autocomplete` dependency refuses. The repo's other workflows
+  use 20, and that is still right for them.
+- **`eas init --force`.** Without it the first run stops on "Project does not
+  exist"; `--non-interactive` will link an existing project but not create one.
+- **The `expo` package as a devDependency.** eas-cli resolves iOS entitlements
+  through Expo's config system and fails without it, even though nothing here
+  is an Expo app. It is used only by the CLI.
+- **Apple credentials must already exist on EAS.** This is the one that cannot
+  be worked around from CI alone: `--non-interactive` will use credentials but
+  never create them, and stops with "couldn't find any credentials suitable for
+  internal distribution". Either add the four Apple secrets so the workflow can
+  pass them as `EXPO_ASC_*`, or run `eas build --profile ios-adhoc` once from a
+  machine, interactively, and let EAS make the certificate and profile. After
+  that, CI needs only `EXPO_TOKEN`.
+
 Two adaptations in `.eas/build/ios-adhoc.yml` are worth knowing about, because
 both would otherwise fail well into a build:
 
