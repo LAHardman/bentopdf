@@ -77,7 +77,7 @@ jobs:
           DISTRIBUTION: ${{ inputs.distribution }}
           IPA_BASE_URL: ${{ steps.dest.outputs.base_url }}
           SKIP_UPLOAD: ${{ inputs.skip_upload && '1' || '' }}
-        run: ./scripts/ios-release.sh
+        run: bash ./scripts/ios-release.sh
 
       - name: Publish the ad-hoc build
         if: inputs.distribution == 'adhoc'

@@ -58,7 +58,9 @@ chmod 600 "$KEY_PATH"
 # The key is a credential; do not leave it behind on a shared runner.
 trap 'rm -f "$KEY_PATH"' EXIT
 
-./scripts/ios-prepare.sh
+# Invoked through bash rather than executed, so a checkout without the
+# executable bit - a Windows clone, say - still works.
+bash "$(dirname "$0")/ios-prepare.sh"
 
 echo "--- Archiving for $DISTRIBUTION (build $BUILD_NUMBER) ---"
 rm -rf "$ARCHIVE" "$EXPORT_DIR"

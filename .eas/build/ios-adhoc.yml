@@ -25,7 +25,10 @@ build:
 
     - run:
         name: Build the web bundle and generate the Xcode project
-        command: ./scripts/ios-prepare.sh
+        # `bash <script>`, not `./script`: EAS uploads the working tree, and
+        # a Windows checkout has no executable bit to upload, so `./` gives
+        # "Permission denied" on the build machine.
+        command: bash ./scripts/ios-prepare.sh
 
     - eas/resolve_apple_team_id_from_credentials:
         id: team

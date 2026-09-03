@@ -28,7 +28,7 @@ build:
           if [ -f "${ASC_KEY_P8:-}" ]; then
             export ASC_KEY_P8="$(cat "$ASC_KEY_P8")"
           fi
-          ./scripts/ios-release.sh
+          bash ./scripts/ios-release.sh
 
     - eas/upload_artifact:
         name: Upload the .ipa
