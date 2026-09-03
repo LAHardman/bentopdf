@@ -3,11 +3,18 @@
     "name": "BentoPDF",
     "slug": "bentopdf",
     "version": "1.0.0",
-    "platforms": ["ios"],
+    "platforms": [
+      "ios"
+    ],
     "ios": {
       "bundleIdentifier": "com.bentopdf.personal",
       "entitlements": {
-        "com.apple.security.application-groups": ["group.com.bentopdf.personal"]
+        "com.apple.security.application-groups": [
+          "group.com.bentopdf.personal"
+        ]
+      },
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "extra": {
