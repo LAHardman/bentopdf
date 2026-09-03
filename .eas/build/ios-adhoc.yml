@@ -28,7 +28,12 @@ build:
         # `bash <script>`, not `./script`: EAS uploads the working tree, and
         # a Windows checkout has no executable bit to upload, so `./` gives
         # "Permission denied" on the build machine.
-        command: bash ./scripts/ios-prepare.sh
+        command: |
+          # A Windows checkout uploads CRLF, which bash cannot read as a script
+          # ("set: pipefail: invalid option name"). .gitattributes fixes this at
+          # the source, but an older checkout on disk still has it.
+          perl -pi -e 's/\r$//' scripts/*.sh
+          bash ./scripts/ios-prepare.sh
 
     - eas/resolve_apple_team_id_from_credentials:
         id: team

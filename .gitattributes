@@ -1,0 +1,30 @@
+# Shell scripts must stay LF even in a Windows checkout.
+#
+# EAS uploads the working tree rather than the git tree, so whatever git wrote
+# to disk is what runs on the build machine. A CRLF checkout turns the first
+# line into `set -euo pipefail\r`, and bash rejects it:
+#
+#   set: pipefail: invalid option name
+#
+# The same upload path is why the executable bit cannot be relied on either -
+# the CI configs invoke these through `bash <script>` for that reason.
+*.sh text eol=lf
+
+# Normalise text in the repository, and leave binaries alone.
+* text=auto
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.wasm binary
+*.gz binary
+*.br binary
+*.tgz binary
+*.zip binary
+*.apk binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary

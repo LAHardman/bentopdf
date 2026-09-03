@@ -28,6 +28,10 @@ build:
           if [ -f "${ASC_KEY_P8:-}" ]; then
             export ASC_KEY_P8="$(cat "$ASC_KEY_P8")"
           fi
+          # A Windows checkout uploads CRLF, which bash cannot read as a script
+          # ("set: pipefail: invalid option name"). .gitattributes fixes this at
+          # the source, but an older checkout on disk still has it.
+          perl -pi -e 's/\r$//' scripts/*.sh
           bash ./scripts/ios-release.sh
 
     - eas/upload_artifact:
